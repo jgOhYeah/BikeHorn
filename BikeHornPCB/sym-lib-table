@@ -1,0 +1,3 @@
+(sym_lib_table
+  (lib (name Transistor_FET)(type Legacy)(uri ${KIPRJMOD}/Transistor_FET.lib)(options "")(descr ""))
+)

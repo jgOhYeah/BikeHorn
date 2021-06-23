@@ -1,0 +1,4 @@
+https://grabcad.com/library/tactile-switch-smd-6mm-series-1
+https://www.digikey.com.au/product-detail/en/e-switch/TL1107BF130WQ/EG2512-ND/378978
+https://grabcad.com/library/arduino-nano-ch340-1
+https://grabcad.com/library/aaa-battery-holder-5

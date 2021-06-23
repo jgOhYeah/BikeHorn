@@ -1,0 +1,485 @@
+EESchema Schematic File Version 4
+EELAYER 30 0
+EELAYER END
+$Descr A4 11693 8268
+encoding utf-8
+Sheet 1 1
+Title ""
+Date ""
+Rev ""
+Comp ""
+Comment1 ""
+Comment2 ""
+Comment3 ""
+Comment4 ""
+$EndDescr
+$Comp
+L Transistor_FET:PiezoDriverCoil L2
+U 1 1 60B4F92C
+P 5450 1800
+F 0 "L2" H 5568 1746 50  0000 L CNN
+F 1 "PiezoDriverCoil" H 5568 1655 50  0000 L CNN
+F 2 "Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Horizontal" H 5900 1800 50  0001 C CNN
+F 3 "" H 5900 1800 50  0001 C CNN
+	1    5450 1800
+	1    0    0    -1  
+$EndComp
+$Comp
+L Device:L L1
+U 1 1 60B55A3E
+P 2450 1500
+F 0 "L1" H 2503 1546 50  0000 L CNN
+F 1 "L" H 2503 1455 50  0000 L CNN
+F 2 "Inductor_THT:L_Radial_D9.5mm_P5.00mm_Fastron_07HVP" H 2450 1500 50  0001 C CNN
+F 3 "~" H 2450 1500 50  0001 C CNN
+	1    2450 1500
+	0    -1   -1   0   
+$EndComp
+$Comp
+L Device:D_Schottky D1
+U 1 1 60B63BDF
+P 3250 1500
+F 0 "D1" H 3250 1283 50  0000 C CNN
+F 1 "D_Schottky" H 3250 1374 50  0000 C CNN
+F 2 "Diode_SMD:D_3220_8050Metric" H 3250 1500 50  0001 C CNN
+F 3 "~" H 3250 1500 50  0001 C CNN
+	1    3250 1500
+	-1   0    0    1   
+$EndComp
+Wire Wire Line
+	2850 1850 2850 1500
+Wire Wire Line
+	2850 1500 3100 1500
+Connection ~ 2850 1500
+$Comp
+L Connector:Conn_01x02_Male J1
+U 1 1 60B78ED5
+P 1300 1850
+F 0 "J1" H 1408 2031 50  0000 C CNN
+F 1 "Battery" H 1408 1940 50  0000 C CNN
+F 2 "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical" H 1300 1850 50  0001 C CNN
+F 3 "~" H 1300 1850 50  0001 C CNN
+	1    1300 1850
+	1    0    0    -1  
+$EndComp
+$Comp
+L Device:C C1
+U 1 1 60B7A306
+P 1950 2050
+F 0 "C1" H 2065 2096 50  0000 L CNN
+F 1 "C" H 2065 2005 50  0000 L CNN
+F 2 "Capacitor_THT:CP_Radial_D5.0mm_P2.50mm" H 1988 1900 50  0001 C CNN
+F 3 "~" H 1950 2050 50  0001 C CNN
+	1    1950 2050
+	1    0    0    -1  
+$EndComp
+$Comp
+L Device:CP C2
+U 1 1 60B7BA39
+P 3650 2050
+F 0 "C2" H 3768 2096 50  0000 L CNN
+F 1 "CP" H 3768 2005 50  0000 L CNN
+F 2 "Capacitor_THT:CP_Radial_D5.0mm_P2.50mm" H 3688 1900 50  0001 C CNN
+F 3 "~" H 3650 2050 50  0001 C CNN
+	1    3650 2050
+	1    0    0    -1  
+$EndComp
+Wire Wire Line
+	1500 1850 1650 1850
+Wire Wire Line
+	1650 1850 1650 1500
+Wire Wire Line
+	1650 1500 1950 1500
+Wire Wire Line
+	1950 1900 1950 1500
+Connection ~ 1950 1500
+Wire Wire Line
+	1950 1500 2300 1500
+Wire Wire Line
+	3650 1900 3650 1500
+Wire Wire Line
+	1500 1950 1650 1950
+Wire Wire Line
+	1650 1950 1650 2450
+Wire Wire Line
+	1650 2450 1950 2450
+Wire Wire Line
+	1950 2450 1950 2200
+Wire Wire Line
+	1950 2450 2850 2450
+Wire Wire Line
+	2850 2450 2850 2250
+Connection ~ 1950 2450
+Wire Wire Line
+	3650 2450 3650 2200
+Connection ~ 2850 2450
+Wire Wire Line
+	4600 1850 4600 1800
+Wire Wire Line
+	4600 2250 4600 2450
+Wire Wire Line
+	5450 1550 5450 1500
+$Comp
+L MCU_Module:Arduino_Nano_v2.x A1
+U 1 1 60B9D909
+P 8850 5050
+F 0 "A1" H 8850 3961 50  0000 C CNN
+F 1 "Arduino_Nano_v2.x" H 8850 3870 50  0000 C CNN
+F 2 "footprints:Arduino_Nano" H 8850 5050 50  0001 C CIN
+F 3 "https://www.arduino.cc/en/uploads/Main/ArduinoNanoManual23.pdf" H 8850 5050 50  0001 C CNN
+	1    8850 5050
+	1    0    0    -1  
+$EndComp
+$Comp
+L Connector:Conn_01x02_Male J3
+U 1 1 60BAFD78
+P 6550 1850
+F 0 "J3" H 6522 1824 50  0000 R CNN
+F 1 "Piezo" H 6522 1733 50  0000 R CNN
+F 2 "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical" H 6550 1850 50  0001 C CNN
+F 3 "~" H 6550 1850 50  0001 C CNN
+	1    6550 1850
+	-1   0    0    -1  
+$EndComp
+Wire Wire Line
+	6350 1850 6250 1850
+Wire Wire Line
+	6250 1850 6250 1500
+Wire Wire Line
+	6250 1500 5450 1500
+Connection ~ 5450 1500
+Wire Wire Line
+	6350 1950 6250 1950
+Wire Wire Line
+	6250 1950 6250 2300
+Wire Wire Line
+	6250 2300 5450 2300
+Wire Wire Line
+	5450 2300 5450 2250
+$Comp
+L Device:D_Zener D2
+U 1 1 60BCF579
+P 3900 2050
+F 0 "D2" V 3854 2130 50  0000 L CNN
+F 1 "D_Zener" V 3945 2130 50  0000 L CNN
+F 2 "Diode_THT:D_5W_P10.16mm_Horizontal" H 3900 2050 50  0001 C CNN
+F 3 "~" H 3900 2050 50  0001 C CNN
+	1    3900 2050
+	0    1    1    0   
+$EndComp
+Wire Wire Line
+	3900 1900 3900 1500
+Wire Wire Line
+	3900 2200 3900 2450
+Connection ~ 3650 1500
+Wire Wire Line
+	3650 1500 3400 1500
+Connection ~ 3650 2450
+Connection ~ 3900 1500
+Connection ~ 3900 2450
+Wire Wire Line
+	3650 1500 3900 1500
+Wire Wire Line
+	3900 1500 4200 1500
+Wire Wire Line
+	3650 2450 3900 2450
+$Comp
+L power:+BATT #PWR0101
+U 1 1 60BE48DD
+P 1650 1500
+F 0 "#PWR0101" H 1650 1350 50  0001 C CNN
+F 1 "+BATT" H 1665 1673 50  0000 C CNN
+F 2 "" H 1650 1500 50  0001 C CNN
+F 3 "" H 1650 1500 50  0001 C CNN
+	1    1650 1500
+	1    0    0    -1  
+$EndComp
+Connection ~ 1650 1500
+$Comp
+L power:GND #PWR0102
+U 1 1 60BE6A2E
+P 1650 2450
+F 0 "#PWR0102" H 1650 2200 50  0001 C CNN
+F 1 "GND" H 1655 2277 50  0000 C CNN
+F 2 "" H 1650 2450 50  0001 C CNN
+F 3 "" H 1650 2450 50  0001 C CNN
+	1    1650 2450
+	1    0    0    -1  
+$EndComp
+Connection ~ 1650 2450
+$Comp
+L Device:R R3
+U 1 1 60C29018
+P 6600 3450
+F 0 "R3" H 6670 3496 50  0000 L CNN
+F 1 "1k" H 6670 3405 50  0000 L CNN
+F 2 "Resistor_SMD:R_0805_2012Metric_Pad1.20x1.40mm_HandSolder" V 6530 3450 50  0001 C CNN
+F 3 "~" H 6600 3450 50  0001 C CNN
+	1    6600 3450
+	1    0    0    -1  
+$EndComp
+$Comp
+L Device:R R4
+U 1 1 60C2B24F
+P 6900 3450
+F 0 "R4" H 6970 3496 50  0000 L CNN
+F 1 "1k" H 6970 3405 50  0000 L CNN
+F 2 "Resistor_SMD:R_0805_2012Metric_Pad1.20x1.40mm_HandSolder" V 6830 3450 50  0001 C CNN
+F 3 "~" H 6900 3450 50  0001 C CNN
+	1    6900 3450
+	1    0    0    -1  
+$EndComp
+Wire Wire Line
+	6200 3700 6600 3700
+Wire Wire Line
+	6600 3700 6600 3600
+Wire Wire Line
+	7350 3700 7350 4650
+Wire Wire Line
+	7350 4650 8350 4650
+Connection ~ 6600 3700
+Wire Wire Line
+	8350 4750 7100 4750
+$Comp
+L power:GND #PWR0103
+U 1 1 60BE864D
+P 7200 3850
+F 0 "#PWR0103" H 7200 3600 50  0001 C CNN
+F 1 "GND" H 7205 3677 50  0000 C CNN
+F 2 "" H 7200 3850 50  0001 C CNN
+F 3 "" H 7200 3850 50  0001 C CNN
+	1    7200 3850
+	1    0    0    -1  
+$EndComp
+$Comp
+L power:+BATT #PWR0104
+U 1 1 60C85AE6
+P 6600 3150
+F 0 "#PWR0104" H 6600 3000 50  0001 C CNN
+F 1 "+BATT" H 6615 3323 50  0000 C CNN
+F 2 "" H 6600 3150 50  0001 C CNN
+F 3 "" H 6600 3150 50  0001 C CNN
+	1    6600 3150
+	1    0    0    -1  
+$EndComp
+Wire Wire Line
+	6600 3200 6600 3150
+Wire Wire Line
+	6600 3300 6600 3200
+Connection ~ 6600 3200
+Wire Wire Line
+	6900 3300 6900 3200
+Wire Wire Line
+	6900 3200 6600 3200
+$Comp
+L power:+BATT #PWR0106
+U 1 1 60C94DCA
+P 9050 3950
+F 0 "#PWR0106" H 9050 3800 50  0001 C CNN
+F 1 "+BATT" H 9065 4123 50  0000 C CNN
+F 2 "" H 9050 3950 50  0001 C CNN
+F 3 "" H 9050 3950 50  0001 C CNN
+	1    9050 3950
+	1    0    0    -1  
+$EndComp
+Wire Wire Line
+	9050 3950 9050 4050
+$Comp
+L power:GND #PWR0107
+U 1 1 60C975E7
+P 8950 6150
+F 0 "#PWR0107" H 8950 5900 50  0001 C CNN
+F 1 "GND" H 8955 5977 50  0000 C CNN
+F 2 "" H 8950 6150 50  0001 C CNN
+F 3 "" H 8950 6150 50  0001 C CNN
+	1    8950 6150
+	1    0    0    -1  
+$EndComp
+Wire Wire Line
+	8950 6050 8950 6100
+Wire Wire Line
+	8850 6050 8850 6100
+Wire Wire Line
+	8850 6100 8950 6100
+Connection ~ 8950 6100
+Wire Wire Line
+	8950 6100 8950 6150
+$Comp
+L Device:LED D4
+U 1 1 60C9BFFD
+P 7700 5600
+F 0 "D4" H 7693 5817 50  0000 C CNN
+F 1 "LED" H 7693 5726 50  0000 C CNN
+F 2 "LED_THT:LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm" H 7700 5600 50  0001 C CNN
+F 3 "~" H 7700 5600 50  0001 C CNN
+	1    7700 5600
+	0    -1   -1   0   
+$EndComp
+$Comp
+L Device:R R7
+U 1 1 60C9D576
+P 8100 5150
+F 0 "R7" V 7893 5150 50  0000 C CNN
+F 1 "249" V 7984 5150 50  0000 C CNN
+F 2 "Resistor_SMD:R_0805_2012Metric_Pad1.20x1.40mm_HandSolder" V 8030 5150 50  0001 C CNN
+F 3 "~" H 8100 5150 50  0001 C CNN
+	1    8100 5150
+	0    1    1    0   
+$EndComp
+Wire Wire Line
+	8350 5150 8250 5150
+Wire Wire Line
+	7950 5150 7700 5150
+Wire Wire Line
+	7700 5150 7700 5450
+Wire Wire Line
+	8850 6100 7700 6100
+Wire Wire Line
+	7700 6100 7700 5750
+Connection ~ 8850 6100
+Text Label 9200 4050 0    50   ~ 0
+Arduino_needs_to_be_modified_to_convert_to_3.3v
+$Comp
+L Connector:Conn_01x03_Male J2
+U 1 1 60B68793
+P 6000 3800
+F 0 "J2" H 5972 3732 50  0000 R CNN
+F 1 "Horn" H 5972 3823 50  0000 R CNN
+F 2 "footprints:Molex_KK-254_1x03_P2.54mm_Horizontal" H 6000 3800 50  0001 C CNN
+F 3 "~" H 6000 3800 50  0001 C CNN
+	1    6000 3800
+	1    0    0    -1  
+$EndComp
+Wire Wire Line
+	6600 3700 7350 3700
+Connection ~ 6900 3900
+Wire Wire Line
+	7100 3900 6900 3900
+Wire Wire Line
+	7100 4750 7100 3900
+Wire Wire Line
+	6900 3900 6900 3600
+Wire Wire Line
+	6200 3900 6900 3900
+Wire Wire Line
+	6200 3800 7200 3800
+Wire Wire Line
+	7200 3800 7200 3850
+Wire Wire Line
+	3900 2450 4200 2450
+Wire Wire Line
+	2850 2450 3650 2450
+Wire Wire Line
+	2600 1500 2850 1500
+$Comp
+L Transistor_BJT:BC337 Q1
+U 1 1 60BAF029
+P 2750 2050
+F 0 "Q1" H 2941 2096 50  0000 L CNN
+F 1 "BC337" H 2941 2005 50  0000 L CNN
+F 2 "Package_TO_SOT_THT:TO-92_Inline_Wide" H 2950 1975 50  0001 L CIN
+F 3 "https://diotec.com/tl_files/diotec/files/pdf/datasheets/bc337.pdf" H 2750 2050 50  0001 L CNN
+	1    2750 2050
+	1    0    0    -1  
+$EndComp
+$Comp
+L Transistor_BJT:BC337 Q2
+U 1 1 60BAFC94
+P 4700 2050
+F 0 "Q2" H 4891 2096 50  0000 L CNN
+F 1 "BC337" H 4891 2005 50  0000 L CNN
+F 2 "Package_TO_SOT_THT:TO-92_Inline_Wide" H 4900 1975 50  0001 L CIN
+F 3 "https://diotec.com/tl_files/diotec/files/pdf/datasheets/bc337.pdf" H 4700 2050 50  0001 L CNN
+	1    4700 2050
+	-1   0    0    -1  
+$EndComp
+Wire Wire Line
+	4600 1800 5350 1800
+$Comp
+L Device:R R1
+U 1 1 60BBB079
+P 2450 2850
+F 0 "R1" H 2520 2896 50  0000 L CNN
+F 1 "180" H 2520 2805 50  0000 L CNN
+F 2 "Resistor_SMD:R_0805_2012Metric_Pad1.20x1.40mm_HandSolder" V 2380 2850 50  0001 C CNN
+F 3 "~" H 2450 2850 50  0001 C CNN
+	1    2450 2850
+	1    0    0    -1  
+$EndComp
+$Comp
+L Device:R R2
+U 1 1 60BBBD50
+P 5000 2850
+F 0 "R2" H 5070 2896 50  0000 L CNN
+F 1 "180" H 5070 2805 50  0000 L CNN
+F 2 "Resistor_SMD:R_0805_2012Metric_Pad1.20x1.40mm_HandSolder" V 4930 2850 50  0001 C CNN
+F 3 "~" H 5000 2850 50  0001 C CNN
+	1    5000 2850
+	1    0    0    -1  
+$EndComp
+Wire Wire Line
+	2550 2050 2450 2050
+Wire Wire Line
+	2450 2050 2450 2700
+Wire Wire Line
+	4900 2050 5000 2050
+Wire Wire Line
+	5000 2050 5000 2700
+Wire Wire Line
+	2450 3000 2450 4950
+$Comp
+L Device:R R5
+U 1 1 60B7464F
+P 4200 1750
+F 0 "R5" H 4270 1796 50  0000 L CNN
+F 1 "10k" H 4270 1705 50  0000 L CNN
+F 2 "Resistor_SMD:R_0805_2012Metric_Pad1.20x1.40mm_HandSolder" V 4130 1750 50  0001 C CNN
+F 3 "~" H 4200 1750 50  0001 C CNN
+	1    4200 1750
+	1    0    0    -1  
+$EndComp
+$Comp
+L Device:R R6
+U 1 1 60B74F69
+P 4200 2200
+F 0 "R6" H 4270 2246 50  0000 L CNN
+F 1 "680" H 4270 2155 50  0000 L CNN
+F 2 "Resistor_SMD:R_0805_2012Metric_Pad1.20x1.40mm_HandSolder" V 4130 2200 50  0001 C CNN
+F 3 "~" H 4200 2200 50  0001 C CNN
+	1    4200 2200
+	1    0    0    -1  
+$EndComp
+Wire Wire Line
+	4200 1500 4200 1600
+Connection ~ 4200 1500
+Wire Wire Line
+	4200 1500 5450 1500
+Wire Wire Line
+	4200 1900 4200 2000
+Wire Wire Line
+	4200 2350 4200 2450
+Connection ~ 4200 2450
+Wire Wire Line
+	4200 2450 4600 2450
+Wire Wire Line
+	4200 2000 4400 2000
+Wire Wire Line
+	4400 2000 4400 2600
+Wire Wire Line
+	4400 2600 9750 2600
+Wire Wire Line
+	9750 2600 9750 5050
+Wire Wire Line
+	9750 5050 9350 5050
+Connection ~ 4200 2000
+Wire Wire Line
+	4200 2000 4200 2050
+Text Label 6500 1650 0    50   ~ 0
+EFM-290EDFW_Piezo_Siren_From_Smoke_Alarm
+Wire Wire Line
+	5000 5350 8350 5350
+Wire Wire Line
+	5000 3000 5000 5350
+Wire Wire Line
+	8350 4950 2450 4950
+$EndSCHEMATC
