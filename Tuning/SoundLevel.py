@@ -21,8 +21,8 @@ def audio_callback(indata, frames, time, status):
 stream = sd.InputStream(callback=audio_callback, blocksize=500)
 
 ser = serial.Serial('/dev/ttyUSB0', 38400, timeout=15)  # open serial por
-boost_duty_range = [0] + list(range(40, 91, 5))
-midi_notes = range(33, 71, 1)
+boost_duty_range = [0] + list(range(50, 91, 5))
+midi_notes = range(33, 127, 1)
 piezo_duty_range = range(20, 96, 5)
 
 sound_data = []
