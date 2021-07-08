@@ -1,0 +1,5 @@
+# Python
+*.pyc
+
+# No point in having FreeCAD backup files
+*.FCStd1
