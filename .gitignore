@@ -1,0 +1,8 @@
+# Python
+*.pyc
+
+# FreeCAD Backups
+*.FCStd1
+
+# vscode
+.vscode/*
