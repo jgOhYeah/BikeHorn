@@ -2,15 +2,23 @@
 #include <cppQueue.h>
 #include <Arduino.h>
 #include <LowPower.h>
-#define MANUAL_CUTOFF
 #include <TunePlayer.h>
+#ifdef LOG_RUN_TIME
+    #include <EEPROMWearLevel.h>
+#endif
 #include "tunes.h"
 #include "soundGeneration.h"
+
+// TODO: EEPROM Logging (optional) for battery life analysis.
 
 FlashTuneLoader flashLoader;
 BikeHornSound piezo;
 TunePlayer tune;
 uint8_t curTune = 0;
+
+#ifdef LOG_RUN_TIME
+uint32_t startTime;
+#endif
 
 enum WakePin {none, horn, mode};
 volatile WakePin wakePin;
@@ -21,6 +29,14 @@ void setup() {
     Serial.print(F("There are "));
     Serial.print(tuneCount);
     Serial.println(F(" tunes installed"));
+
+    // Logging
+#ifdef LOG_RUN_TIME
+    EEPROMwl.begin(LOG_VERSION, 4);
+    Serial.print(F("Run time logging enabled. Horn has been sounding for "));
+    Serial.print(getTime() / 1000);
+    Serial.println(F(" seconds."));
+#endif
 
     // Tune Player
     flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
@@ -51,6 +67,10 @@ void loop() {
     // If we got here, a button was pressed
     if(wakePin == horn) {
         // Play a tune
+
+#ifdef LOG_RUN_TIME
+        uint32_t wakeTime = millis();
+#endif
         // Start playing
         startBoost();
         tune.play();
@@ -76,6 +96,9 @@ void loop() {
             }
             curTime = millis();
         }
+#ifdef LOG_RUN_TIME
+        addTime(millis() - wakeTime);
+#endif
     } else {
         // Change tune as the other button is pressed
         digitalWrite(LED_EXTERNAL, HIGH);
@@ -212,3 +235,18 @@ byte getByte() {
     while (!Serial.available() && digitalRead(BUTTON_HORN)) {} //Wait while there are no bytes to read in the buffer.
     return Serial.read();
 }
+
+// Stuff only needed if recording run time.
+#ifdef LOG_RUN_TIME
+uint32_t getTime() {
+    return (EEPROMwl.read(0) << 24) + (EEPROMwl.read(1) << 16) + (EEPROMwl.read(2) << 8) + EEPROMwl.read(3);
+}
+
+void addTime(uint32_t time) {
+    time += getTime();
+    EEPROMwl.update(0, (time >> 24) & 0xFF);
+    EEPROMwl.update(1, (time >> 16) & 0xFF);
+    EEPROMwl.update(2, (time >> 8) & 0xFF);
+    EEPROMwl.update(3, time & 0xFF);
+}
+#endif
