@@ -6,7 +6,10 @@ Note that the loudness values are arbitary and as the microphone is probably not
 > **Please note:** You might want to be careful about where and when you run this. It needs to be done in a fairly quiet place, but is VERY loud for quite a long time.
 
 ## Requirements
-- Python3, Numpy, Matplotlib, Sounddevice, Serial
+The scripts are written using Python 3. A few python libraries are required and can be installed using pip3:
+```sh
+sudo pip3 install sounddevice pyserial numpy matplotlib
+```
 
 ## Data gathering
 1. Flash the *Tuning.ino* sketch to the Arduino. This receives duty cycle and frequency instructions over the serial port, outputs them and if present, reads the ADC back.
@@ -20,29 +23,29 @@ Note that the loudness values are arbitary and as the microphone is probably not
 
 ## Using the data
 1. Check that there have been enough data points gathered and the range of values tested is big enough. For the *HF_Good_Recorded_Results.npz*, I didn't have the maximum piezo duty cycle high enough for finding the maximum loudness of lower frequencies, so I had to re run it for the lower notes with different parameters.
-2. Edit the manual mapping (around line 174 of *DisplayData.py*) so that it roughly follows the recommended values in *Figure 2*. Once you are happy with this, the code that is given in the console can be copied and pasted into *soundGenerators.h*. Some manual cleaning up and optimisation will probably be required.
+2. Edit the manual mapping (near the top of *DisplayData.py*) so that it roughly follows the recommended values in *Figure 2*. Once you are happy with this, the code that is given in the console can be copied and pasted into *soundGenerators.h*. Some manual cleaning up and optimisation will probably be required.
 
 ## Example graphs
 ### Figure 1
 Understanding and analysis on a per note basis.
 
-Example with a nice curve.
-![Figure 1 graph](examples/Figure_1.png)
+Example with a nice curve. Note the clearly visible peak on the blue graph indicating that a duty cycle of around 20% for the piezo and 80% for the first bosting stage are loudest for that note.
+![Figure 1 graph](images/Figure_1.png)
 
 Example of a higher frequency note but still a nice curve.
-![Figure 1 graph](examples/Figure_1_HF.png)
+![Figure 1 graph](images/Figure_1_HF.png)
 
-Example of a lower frequency note but not enough range (no "peak" in curve).
-![Figure 1 graph](examples/Figure_1_too_small_range.png)
+Example of a lower frequency note but not enough range (no "peak" in curve). The piezo duty cycle range should include values over 50%.
+![Figure 1 graph](images/Figure_1_too_small_range.png)
 
 ### Figure 2
 Visualising the actual mapping of ideal parameters across each note. Use this to set the orange line manually.
-![Figure 2 Graph](examples/Figure_2.png)
+![Figure 2 Graph](images/Figure_2.png)
 
 ### Figure 3
 Pretty much figure 2, but with the *x* axis transformed from midi notes to the maximum counter of timer 1 and *y* axis transformed to the compare value of each respective timer.
-![Figure 3 Graph](examples/Figure_3.png)
+![Figure 3 Graph](images/Figure_3.png)
 
 ### Figure 4
 Mainly for curiosity.
-![Figure 4 Graph](examples/Figure_4.png)
+![Figure 4 Graph](images/Figure_4.png)

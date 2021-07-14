@@ -1,8 +1,23 @@
 #!/usr/bin/env python3
+""" DisplayData.py
+Script for displaying data collected during tuning and optimisation of the
+BikeHorn.
+See Readme.md in the same folder for more info or go to
+https://github.com/jgOhYeah/BikeHorn/tree/main/Tuning
+
+Written by Jotham Gates
+Last modified 14/07/2021
+"""
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 import sys
+
+# Manual coordinates to draw a straight line between for mapping the opimal settings. These will be exported to the arduino.
+boost_x = np.array([21, 47, 57, 95, 110, 127])
+boost_y = np.array([72, 72, 85, 85, 60, 60])
+piezo_x = np.array([21, 50, 90, 127])
+piezo_y = np.array([95, 95, 8, 8])
 
 def midi_freq(midi):
     """ Converts a midi note to a frequency. See https://newt.phys.unsw.edu.au/jw/notes.html """
@@ -46,7 +61,8 @@ def linear(x1, y1, x2, y2):
     return m, c
 
 def mapping(x, y, dtype, invar, outvar):
-    """ Works out a linear function for each range """
+    """ Works out a linear function for each range. Will still need some sanity
+    checking and cleaning up by hand. """
     result = "{} {};\n".format(dtype, outvar)
     result += "if({} > {:.0f}) {{\n    {} = {:.0f};\n}} ".format(invar, x[0], outvar, y[0])
     for i in range(1, len(x)):
@@ -170,11 +186,6 @@ for i in range(len(sound_data)):
     corresponding_adc[i] = adc_data[i, boost_index, piezo_index]
 
     # print("Midi: {}\tLoudness: {}\tBest boost: {}\tBest piezo: {}".format(midi_notes[i], sound_data[i, boost_index, piezo_index], best_boost_duty[i], best_piezo_duty[i]))
-
-boost_x = np.array([21, 47, 57, 95, 110, 127])
-boost_y = np.array([72, 72, 85, 85, 60, 60])
-piezo_x = np.array([21, 50, 90, 127])
-piezo_y = np.array([95, 95, 8, 8])
 
 # Display
 fig_best_params = plt.figure()
