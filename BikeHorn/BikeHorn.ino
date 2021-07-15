@@ -1,15 +1,26 @@
+/** BikeHorn.ino
+ * Source code for the BikeHorn.
+ * 
+ * For more details, see README.md or go to
+ * https://github.com/jgOhYeah/BikeHorn
+ * 
+ * Written by Jotham Gates
+ * Last modified 15/07/2021
+ */
+
 #include "defines.h"
+
+// Libraries to include. EEPROMWearLevel is only required if LOG_RUN_TIME is
+// defined in defines.h
 #include <cppQueue.h>
-#include <Arduino.h>
 #include <LowPower.h>
 #include <TunePlayer.h>
 #ifdef LOG_RUN_TIME
     #include <EEPROMWearLevel.h>
 #endif
+
 #include "tunes.h"
 #include "soundGeneration.h"
-
-// TODO: EEPROM Logging (optional) for battery life analysis.
 
 FlashTuneLoader flashLoader;
 BikeHornSound piezo;
@@ -20,6 +31,7 @@ uint8_t curTune = 0;
 uint32_t startTime;
 #endif
 
+// Stores which pin was responsible for waking the system up.
 enum WakePin {none, horn, mode};
 volatile WakePin wakePin;
 
@@ -30,12 +42,16 @@ void setup() {
     Serial.print(tuneCount);
     Serial.println(F(" tunes installed"));
 
-    // Logging
+    // Logging (optional)
 #ifdef LOG_RUN_TIME
-    EEPROMwl.begin(LOG_VERSION, 4);
+    EEPROMwl.begin(LOG_VERSION, 6);
     Serial.print(F("Run time logging enabled. Horn has been sounding for "));
     Serial.print(getTime() / 1000);
     Serial.println(F(" seconds."));
+    Serial.print(F("The horn has been used "));
+    Serial.print(getBeeps());
+    Serial.println(F(" times."));
+
 #endif
 
     // Tune Player
@@ -98,6 +114,7 @@ void loop() {
         }
 #ifdef LOG_RUN_TIME
         addTime(millis() - wakeTime);
+        addBeep();
 #endif
     } else {
         // Change tune as the other button is pressed
@@ -142,13 +159,13 @@ void sleepGPIO() {
 
     // Using registers so everything can be done at once easily.
     DDRB = (1 << PB1) | (1 << PB3); // Set everything except pwm to input pullup
-    DDRC = 0; // TODO: Remove voltage divider as is will be wasting power.
+    DDRC = 0;
 
     // Pull all unused pins high to avoid floating and reduce power.
     DDRD = 0x03; // Set serial as an output to tie low
     PORTB = ~((1 << PB1) | (1 << PB3));
     PORTC = 0xff;
-    PORTD = 0xf0; // Don't pull the serial pins and buttons high
+    PORTD = 0xfc; // Don't pull the serial pins high
     
     // Keep as outputs
     pinMode(LED_EXTERNAL, OUTPUT);
@@ -159,7 +176,7 @@ void sleepGPIO() {
 
 void wakeGPIO() {
     DDRD = 0x02; // Serial TX is the only output
-    PORTD = 0x02; // Idle high serial
+    PORTD = 0x0E; // Idle high serial
     Serial.begin(38400);
     DDRB = (1 << PB1) | (1 << PB3);
     PORTB = 0x00; // Make sure everything is off
@@ -238,15 +255,29 @@ byte getByte() {
 
 // Stuff only needed if recording run time.
 #ifdef LOG_RUN_TIME
+/** @returns the time the horn has been sounding in ms */
 uint32_t getTime() {
     return (EEPROMwl.read(0) << 24) + (EEPROMwl.read(1) << 16) + (EEPROMwl.read(2) << 8) + EEPROMwl.read(3);
 }
 
+/** Add @param time in ms to the total time the horn has been sounding */
 void addTime(uint32_t time) {
     time += getTime();
     EEPROMwl.update(0, (time >> 24) & 0xFF);
     EEPROMwl.update(1, (time >> 16) & 0xFF);
     EEPROMwl.update(2, (time >> 8) & 0xFF);
     EEPROMwl.update(3, time & 0xFF);
+}
+
+/** @returns the number of times the horn has gone off */
+uint16_t getBeeps() {
+    return (EEPROMwl.read(4) << 8) + EEPROMwl.read(5);
+}
+
+/** Adds 1 to the number of times the horn has gone off */
+void addBeep() {
+    uint16_t beeps = getBeeps() + 1;
+    EEPROMwl.update(4, (beeps >> 8) & 0xFF);
+    EEPROMwl.update(5, beeps & 0xFF);
 }
 #endif
