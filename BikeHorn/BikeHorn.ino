@@ -44,7 +44,7 @@ void setup() {
 
     // Logging (optional)
 #ifdef LOG_RUN_TIME
-    EEPROMwl.begin(LOG_VERSION, 6);
+    EEPROMwl.begin(LOG_VERSION, 2);
     Serial.print(F("Run time logging enabled. Horn has been sounding for "));
     Serial.print(getTime() / 1000);
     Serial.println(F(" seconds."));
@@ -59,15 +59,45 @@ void setup() {
     tune.begin(&flashLoader, &piezo);
     tune.spool();
 
-    // Go to midi synth mode if change mode and horn button pressed
+    // Go to midi synth mode if change mode and horn button pressed or reset the eeprom.
     if(!digitalRead(BUTTON_MODE)) {
+#ifdef LOG_RUN_TIME
+    if(!digitalRead(BUTTON_HORN)) {
+        // Both buttons pressed. If both are pressed for 5 seconds, reset the EEPROM.
+        uint32_t startTime = millis();
+        bool success = true;
+        digitalWrite(LED_BUILTIN, HIGH);
+        while(millis() - startTime < 5000) {
+            if(digitalRead(BUTTON_HORN) | digitalRead(BUTTON_MODE)) {
+                success = false;
+                break;
+            }
+            digitalWrite(LED_EXTERNAL, HIGH);
+            delay(100);
+            digitalWrite(LED_EXTERNAL, LOW);
+            delay(100);
+        }
+        digitalWrite(LED_BUILTIN, LOW);
+
+        // Check if we left early or the full time
+        if(success) {
+            Serial.println(F("Resetting EEPROM"));
+            resetEEPROM();
+        }
+    } else {
+        // Only the change tune button pressed. Midi mode.
         midiSynth();
+    }
+#else
+    midiSynth();
+#endif
     }
 }
 
 void loop() {
     // Go to sleep if not pressed and wake up when a button is pressed
     if(digitalRead(BUTTON_HORN)) {
+        Serial.println(F("Going to sleep"));
         sleepGPIO();
         // Set interrupts to wake the processor up again when required
         attachInterrupt(digitalPinToInterrupt(BUTTON_HORN), wakeUpHornISR, LOW);
@@ -76,6 +106,7 @@ void loop() {
         detachInterrupt(digitalPinToInterrupt(BUTTON_HORN));
         detachInterrupt(digitalPinToInterrupt(BUTTON_MODE));
         wakeGPIO();
+        Serial.println(F("Waking up"));
     } else {
         wakePin = horn;
     }
@@ -177,7 +208,7 @@ void sleepGPIO() {
 void wakeGPIO() {
     DDRD = 0x02; // Serial TX is the only output
     PORTD = 0x0E; // Idle high serial
-    Serial.begin(38400);
+    Serial.begin(SERIAL_BAUD);
     DDRB = (1 << PB1) | (1 << PB3);
     PORTB = 0x00; // Make sure everything is off
     pinMode(LED_EXTERNAL, OUTPUT);
@@ -257,27 +288,33 @@ byte getByte() {
 #ifdef LOG_RUN_TIME
 /** @returns the time the horn has been sounding in ms */
 uint32_t getTime() {
-    return (EEPROMwl.read(0) << 24) + (EEPROMwl.read(1) << 16) + (EEPROMwl.read(2) << 8) + EEPROMwl.read(3);
+    uint32_t time;
+    EEPROMwl.get(0, time);
+    return time;
 }
 
 /** Add @param time in ms to the total time the horn has been sounding */
 void addTime(uint32_t time) {
     time += getTime();
-    EEPROMwl.update(0, (time >> 24) & 0xFF);
-    EEPROMwl.update(1, (time >> 16) & 0xFF);
-    EEPROMwl.update(2, (time >> 8) & 0xFF);
-    EEPROMwl.update(3, time & 0xFF);
+    EEPROMwl.put(0, time);
 }
 
 /** @returns the number of times the horn has gone off */
 uint16_t getBeeps() {
-    return (EEPROMwl.read(4) << 8) + EEPROMwl.read(5);
+    uint16_t beeps;
+    EEPROMwl.get(1, beeps);
+    return beeps;
 }
 
 /** Adds 1 to the number of times the horn has gone off */
 void addBeep() {
     uint16_t beeps = getBeeps() + 1;
-    EEPROMwl.update(4, (beeps >> 8) & 0xFF);
-    EEPROMwl.update(5, beeps & 0xFF);
+    EEPROMwl.put(1, beeps);
+}
+
+/** Resets stored data to 0 */
+void resetEEPROM() {
+    EEPROMwl.put(0, (uint32_t)0);
+    EEPROMwl.put(1, (uint16_t)0);
 }
 #endif

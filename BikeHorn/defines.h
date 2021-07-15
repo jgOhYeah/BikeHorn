@@ -16,13 +16,15 @@
 #define BUTTON_HORN 2 // Needs to be interrupt capable (pin 2 or 3)
 #define BUTTON_MODE 3 // Needs to be interrupt capable (pin 2 or 3)
 
+#define SERIAL_BAUD 38400
+
 #define IDLE_DUTY 5 // 9.4% duty cycle, keeps the voltage up when not playing
 #define MIDI_CHANNEL 0 // Zero indexed, so many software shows ch. 0 as ch. 1
 #define DEBOUNCE_TIME 20
 
 // Define this if you want to keep a record of run time when in horn mode for battery usage analysis.
 #define LOG_RUN_TIME
-#define LOG_VERSION 1
+#define LOG_VERSION 2
 
 #define MANUAL_CUTOFF // Allow notes to be stopped.
 

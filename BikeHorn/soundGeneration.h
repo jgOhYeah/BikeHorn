@@ -1,7 +1,9 @@
 /** soundGeneration.h
  * A custom class for making noise, tuned for my specific circuit and piezo
  * 
- * Written by Jotham Gates, 12/06/2021
+ * Written by Jotham Gates
+ * 
+ * Last modified 12/06/2021
  */
 
 class BikeHornSound : public TimerOneSound {
