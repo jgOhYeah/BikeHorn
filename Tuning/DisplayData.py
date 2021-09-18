@@ -11,6 +11,7 @@ Last modified 14/07/2021
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
+from mpl_toolkits.mplot3d import Axes3D
 import sys
 
 # Manual coordinates to draw a straight line between for mapping the opimal settings. These will be exported to the arduino.
@@ -280,7 +281,7 @@ ax_boost_best_f.set_ylabel("Boost duty cycle [%]")
 # Piezo Duty cycle
 ax_piezo_best_f = fig_best_params_f.add_subplot(2, 2, 3)
 ax_piezo_best_f.plot(freqs, best_piezo_duty, color='r')
-ax_piezo_best_f.set_title("Optimal boost duty cycle")
+ax_piezo_best_f.set_title("Optimal piezo duty cycle")
 ax_piezo_best_f.set_xlabel("Frequency [Hz]")
 ax_piezo_best_f.set_ylabel("Piezo duty cycle [%]")
 
@@ -289,14 +290,14 @@ ax_loudness_best_f = fig_best_params_f.add_subplot(2, 2, 2)
 ax_loudness_best_f.plot(freqs, best_loudness, color='g')
 ax_loudness_best_f.set_title("Microphone level at optimal")
 ax_loudness_best_f.set_xlabel("Frequency [Hz]")
-ax_loudness_best_f.set_ylabel("Boost duty cycle [%]")
+ax_loudness_best_f.set_ylabel("Level [no units]")
 
 # ADC
 ax_adc_f = fig_best_params_f.add_subplot(2, 2, 4)
 ax_adc_f.plot(freqs, corresponding_adc, color='g')
 ax_adc_f.set_title("Boost ADC at optimal")
 ax_adc_f.set_xlabel("Frequency [Hz]")
-ax_adc_f.set_ylabel("Piezo duty cycle [%]")
+ax_adc_f.set_ylabel("Boost ADC [0-1023]")
 
 plt.subplots_adjust(hspace=0.5, wspace=0.4, top=0.88, bottom=0.11, left=0.11, right=0.96)
 plt.show()

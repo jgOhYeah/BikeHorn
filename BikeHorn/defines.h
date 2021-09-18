@@ -8,7 +8,7 @@
  * Last modified 18/09/2021
  */
  
-#define VERSION "1.0.1"
+#define VERSION "1.1.0"
 
 #define PIEZO_PIN 9 // Fixed as PB1 (Pin 9 on Arduino Nano)
 #define BOOST_PIN 11 // Fixed as PB3 (Pin 11 on Arduino Nano)
@@ -21,6 +21,9 @@
 #define IDLE_DUTY 5 // 9.4% duty cycle, keeps the voltage up when not playing
 #define MIDI_CHANNEL 0 // Zero indexed, so many software shows ch. 0 as ch. 1
 #define DEBOUNCE_TIME 20
+
+#define ENABLE_WARBLE // Define this to add a warble sound as a final tune (like various burgler alarms, sirens and
+                      // existing HPV horns)
 
 // Define this if you want to keep a record of run time when in horn mode for battery usage analysis.
 #define LOG_RUN_TIME

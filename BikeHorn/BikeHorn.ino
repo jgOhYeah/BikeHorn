@@ -35,6 +35,11 @@ BikeHornSound piezo;
 TunePlayer tune;
 uint8_t curTune = 0;
 
+#ifdef ENABLE_WARBLE
+Warble warble;
+#endif
+
+
 #ifdef LOG_RUN_TIME
 uint32_t startTime;
 #endif
@@ -67,6 +72,11 @@ void setup() {
     tune.begin(&flashLoader, &piezo);
     tune.spool();
 
+#ifdef ENABLE_WARBLE
+    /// Warble mode
+    warble.begin(&piezo, 3000, 3800, 70, 1, 20);
+#endif
+
     // Go to midi synth mode if change mode and horn button pressed or reset the eeprom.
     if(!digitalRead(BUTTON_MODE)) {
 #ifdef LOG_RUN_TIME
@@ -87,7 +97,7 @@ void setup() {
         }
         digitalWrite(LED_BUILTIN, LOW);
 
-        // Check if we left early or the full time
+        // Check if we left early or at the full time
         if(success) {
             Serial.println(F("Resetting EEPROM"));
             resetEEPROM();
@@ -128,7 +138,18 @@ void loop() {
 #endif
         // Start playing
         startBoost();
+
+#ifdef ENABLE_WARBLE
+        if(curTune != tuneCount) {
+            // Normal tune playing mode
+            tune.play();
+        } else {
+            // Warble mode
+            warble.start();
+        }
+#else
         tune.play();
+#endif
 
         // Play until the button has not been pressed in the past DEBOUNCE_TIME ms.
         digitalWrite(LED_EXTERNAL, HIGH);
@@ -137,7 +158,17 @@ void loop() {
         uint32_t startTime = millis();
         uint32_t curTime = millis();
         while (curTime - startTime < DEBOUNCE_TIME) {
+
+#ifdef ENABLE_WARBLE
+            if(curTune != tuneCount) {
+                tune.update();
+            } else {
+                warble.update();
+            }
+#else
             tune.update();
+#endif
+
             static uint32_t ledStart = curTime;
             if(curTime - ledStart > 125) {
                 ledStart = curTime;
@@ -159,12 +190,27 @@ void loop() {
         // Change tune as the other button is pressed
         digitalWrite(LED_EXTERNAL, HIGH);
         curTune++;
+#ifdef ENABLE_WARBLE
+        if(curTune > tuneCount) { // Use == for the warble mode
+            curTune = 0;
+        }
+        if(curTune != tuneCount) {
+            // Change tune as normal
+#else
         if(curTune == tuneCount) {
             curTune = 0;
         }
-        Serial.print(F("Changing to tune "));
-        Serial.println(curTune);
-        flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
+#endif
+            Serial.print(F("Changing to tune "));
+            Serial.println(curTune);
+            flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
+#ifdef ENABLE_WARBLE
+        } else {
+            // Don't do anything here and select on the fly
+            Serial.println(F("Changing to warble mode"));
+
+        }
+#endif
 
         // Only let go once button is not pushed for more than DEBOUNCE_TIME
         uint32_t startTime = millis();
@@ -184,6 +230,9 @@ void loop() {
     // Stop tune and setup for the next time
     tune.stop();
     tune.spool();
+#ifdef ENABLE_WARBLE
+    warble.stop();
+#endif
 }
 
 /**
