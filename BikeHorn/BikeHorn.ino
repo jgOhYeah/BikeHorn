@@ -74,7 +74,7 @@ void setup() {
 
 #ifdef ENABLE_WARBLE
     /// Warble mode
-    warble.begin(&piezo, 3000, 3800, 70, 1, 20);
+    warble.begin(&piezo, WARBLE_LOWER, WARBLE_UPPER, WARBLE_RISE, WARBLE_FALL, WARBLE_UPDATE_INTERVAL);
 #endif
 
     // Go to midi synth mode if change mode and horn button pressed or reset the eeprom.
@@ -228,10 +228,16 @@ void loop() {
     }
 
     // Stop tune and setup for the next time
+#ifdef ENABLE_WARBLE
+    if(curTune != tuneCount) {
+        tune.stop();
+        tune.spool();
+    } else {
+        warble.stop();
+    }
+#else
     tune.stop();
     tune.spool();
-#ifdef ENABLE_WARBLE
-    warble.stop();
 #endif
 }
 

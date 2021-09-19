@@ -4,7 +4,7 @@
  * 
  * Written by Jotham Gates
  * 
- * Last modified 12/06/2021
+ * Last modified 19/09/2021
  */
 
 class BikeHornSound : public TimerOneSound {
@@ -66,6 +66,7 @@ class BikeHornSound : public TimerOneSound {
         }
 };
 
+#ifdef ENABLE_WARBLE
 /**
  * lass to create the warbling noise
  */
@@ -74,7 +75,7 @@ class Warble {
         /**
          * Initialises the library with the given parameters
          */
-        void begin(BikeHornSound *newSoundGenerator, uint16_t newLower, uint16_t newUpper, uint16_t newRiseTime, uint16_t newFallTime, uint16_t newUpdateInterval) {
+        void begin(BikeHornSound *newSoundGenerator, uint16_t newLower, uint16_t newUpper, uint32_t newRiseTime, uint32_t newFallTime, uint32_t newUpdateInterval) {
             soundGenerator = newSoundGenerator;
             soundGenerator->begin();
 
@@ -90,7 +91,7 @@ class Warble {
          */
         void update() {
             if(isActive) {
-                uint32_t time = millis();
+                uint32_t time = micros();
                 if(time - lastUpdate > updateInterval) {
                     lastUpdate = time;
                     // Calculate the next frequency to play
@@ -121,7 +122,7 @@ class Warble {
          */
         void start() {
             isRising = false;
-            lastUpdate = millis();
+            lastUpdate = micros();
             frequency = upper;
             isActive = true;
         }
@@ -136,9 +137,11 @@ class Warble {
 
     private:
         BikeHornSound *soundGenerator;
-        uint16_t lower, upper, riseTime, fallTime, frequency;
+        uint16_t lower, upper, frequency;
         bool isRising;
         bool isActive = false;
-        uint32_t lastUpdate, updateInterval;
+        uint32_t lastUpdate, updateInterval, riseTime, fallTime;
 
 };
+
+#endif
