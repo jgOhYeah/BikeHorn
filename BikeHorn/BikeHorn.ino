@@ -5,7 +5,7 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 18/09/2021
+ * Last modified 19/09/2021
  * 
  * Requires these libraries (can be installed through the library manager):
  *   - Low-Power (https://github.com/rocketscream/Low-Power) - Shuts things down to save power.
@@ -74,7 +74,7 @@ void setup() {
 
 #ifdef ENABLE_WARBLE
     /// Warble mode
-    warble.begin(&piezo, WARBLE_LOWER, WARBLE_UPPER, WARBLE_RISE, WARBLE_FALL, WARBLE_UPDATE_INTERVAL);
+    warble.begin(&piezo, WARBLE_LOWER, WARBLE_UPPER, WARBLE_RISE, WARBLE_FALL);
 #endif
 
     // Go to midi synth mode if change mode and horn button pressed or reset the eeprom.

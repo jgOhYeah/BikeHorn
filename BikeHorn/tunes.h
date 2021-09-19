@@ -6,7 +6,7 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates. Tunes converted from various sources.
- * Last modified 15/07/2021
+ * Last modified 19/09/2021
  */
 
 
@@ -18,7 +18,8 @@ const uint16_t ImperialMarchPICAXE[] PROGMEM = {
     0xf001 // End of tune. Restart from the beginning.
 };
 
-const uint16_t beep[] PROGMEM = {0xe010,0x7cfc,0xf001}; //Converted from Beep
+// const uint16_t beep[] PROGMEM = {0xe010,0x7cfc,0xf001}; // A7
+const uint16_t beep[] PROGMEM = {0xe010,0b1001101111111100,0xf001}; // A7
 
 // Converted from 'rossini_william_tell' by TunePlayer Musescore plugin V1.7.0
 const uint16_t rossini_william_tell[] PROGMEM = {
@@ -54,5 +55,14 @@ const uint16_t Cantina[] PROGMEM = {
     0xf001 // End of tune. Restart from the beginning.
 };
 
-const uint16_t *const tunes[] PROGMEM = {rossini_william_tell, ImperialMarchPICAXE, Final_Countdown, Cantina, beep};
+// Converted from 'TakeOnMeIntroLoop' by TunePlayer Musescore plugin V1.7.0
+const uint16_t TakeOnMeIntroLoop[] PROGMEM = {
+    0xe0c8, // Tempo change to 200 BPM
+    0x6a18,0x6a18,0x2a18,0xb838,0xb838,0x4a38,0x4a38,0x4a18,0x8a18,0x8a18,
+    0x9a18,0xba18,0x9a18,0x9a18,0x9a18,0x4a38,0x2a38,0x6a38,0x6a38,0x6a18,
+    0x4a18,0x4a18,0x6a18,0x4a18,
+    0xf001 // End of tune. Restart from the beginning
+};
+
+const uint16_t *const tunes[] PROGMEM = {rossini_william_tell, TakeOnMeIntroLoop, ImperialMarchPICAXE, Final_Countdown, Cantina, beep};
 const uint8_t tuneCount = sizeof(tunes) / sizeof(uint16_t);

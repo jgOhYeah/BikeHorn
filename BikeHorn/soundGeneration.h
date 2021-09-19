@@ -75,7 +75,7 @@ class Warble {
         /**
          * Initialises the library with the given parameters
          */
-        void begin(BikeHornSound *newSoundGenerator, uint16_t newLower, uint16_t newUpper, uint32_t newRiseTime, uint32_t newFallTime, uint32_t newUpdateInterval) {
+        void begin(BikeHornSound *newSoundGenerator, uint16_t newLower, uint16_t newUpper, uint32_t newRiseTime, uint32_t newFallTime) {
             soundGenerator = newSoundGenerator;
             soundGenerator->begin();
 
@@ -83,7 +83,6 @@ class Warble {
             upper = newUpper;
             riseTime = newRiseTime;
             fallTime = newFallTime;
-            updateInterval = newUpdateInterval;
         }
 
         /**
@@ -94,25 +93,26 @@ class Warble {
                 uint32_t time = micros();
                 if(time - lastUpdate > updateInterval) {
                     lastUpdate = time;
-                    // Calculate the next frequency to play
-                    uint16_t newFreq;
                     if(isRising) {
-                        newFreq = frequency + (updateInterval * (upper - lower)) / riseTime;
-                        if(newFreq >= upper) {
-                            // Time to go back down again
+                        if(frequency != upper) {
+                            // Keep going up
+                            frequency++;
+                        } else {
+                            // Swap to falling
                             isRising = false;
-                            newFreq = upper;
+                            updateInterval = timeStep(fallTime);
                         }
                     } else {
-                        newFreq = frequency - (updateInterval * (upper - lower)) / fallTime;
-                        if(newFreq <= lower) {
-                            // Time to go back up again
+                        if(frequency != lower) {
+                            // Keep going down
+                            frequency--;
+                        } else {
+                            // Swap to rising
                             isRising = true;
-                            newFreq = lower;
+                            updateInterval = timeStep(riseTime);
                         }
                     }
-                    soundGenerator->playFreq(newFreq);
-                    frequency = newFreq;
+                    soundGenerator->playFreq(frequency);
                 }
             }
         }
@@ -125,6 +125,7 @@ class Warble {
             lastUpdate = micros();
             frequency = upper;
             isActive = true;
+            updateInterval = timeStep(fallTime);
         }
 
         /**
@@ -141,6 +142,10 @@ class Warble {
         bool isRising;
         bool isActive = false;
         uint32_t lastUpdate, updateInterval, riseTime, fallTime;
+
+        uint32_t timeStep(uint32_t sweepTime) {
+            return sweepTime / (upper - lower);
+        }
 
 };
 

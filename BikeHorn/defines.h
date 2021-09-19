@@ -5,7 +5,7 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 18/09/2021
+ * Last modified 19/09/2021
  */
  
 #define VERSION "1.1.0"
@@ -27,9 +27,8 @@
                       // existing HPV horns)
 #define WARBLE_LOWER 3000 // Lower frequency (Hz)
 #define WARBLE_UPPER 3800 // Upper frequency (Hz)
-#define WARBLE_RISE 15000 // Up chirp time (ms)
-#define WARBLE_FALL 50000 // Down chirp time (ms)
-#define WARBLE_UPDATE_INTERVAL 1000 // How often to change the frequency during a sweep (us)
+#define WARBLE_RISE 10000 // Up chirp time (ms)
+#define WARBLE_FALL 40000 // Down chirp time (ms)
 
 
 // Define this if you want to keep a record of run time when in horn mode for battery usage analysis.
