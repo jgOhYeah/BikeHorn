@@ -4,7 +4,7 @@
  * 
  * Written by Jotham Gates
  * 
- * Last modified 19/09/2021
+ * Last modified 01/10/2021
  */
 
 class BikeHornSound : public TimerOneSound {
@@ -32,6 +32,20 @@ class BikeHornSound : public TimerOneSound {
             OCR1A = m_compareValue(ICR1); // Duty cycle
         }
 
+        /**
+         * Sets the variables to do software double buffering that will update the values at the correct part of the cycle to stop glitches.
+         */
+        void changeFreq(uint16_t frequency) {
+            TIMSK1 = 0; // Disable this interrupt while updating the values
+            nextTop = F_CPU / 8 / frequency;
+            nextComp = m_compareValue(nextTop);
+            TIMSK1 = (1 << TOIE1); // Enable interrupts when overflowing
+        }
+
+        static volatile uint16_t nextTop;
+        static volatile uint16_t nextComp;
+
+    private:
         /** Returns the value at which the pin should go low each time. Also sets the pwm duty of boost as it is called around the right time */
         uint16_t m_compareValue(uint16_t counter) {
             // For Timer 2: (May need to be adjusted / optimised by hand
@@ -66,9 +80,32 @@ class BikeHornSound : public TimerOneSound {
         }
 };
 
+// TODO: Put this as a static method in the sound generator class to be not so ugly.
+volatile uint16_t BikeHornSound::nextTop;
+volatile uint16_t BikeHornSound::nextComp;
+
+/**
+ * Interrupt for timer overflow to change the frequency of the warble safely at the correct time in the cycle without
+ * using a double bug=ffered register. The manual suggests OCR1A should be set as top as it is double buffered, however
+ * this will disable PWM on the pin I am using.
+ * 
+ * The risk of changing ICR1 randomly at any time is that a reset of the counter only happens when the counter equals
+ * ICR1. This means there is a chance that it could be changed to a value that the counter is currently above. The
+ * counter would then have to count to 0xFFFF and overflow to get back to normal operation, causing a noticable glitch
+ * that makes you question the reliability of the horn.
+ * 
+ * This ISR will only change ICR1 as it is resetting, hopefully avoiding this issue (did someone mention software
+ * solution to hardware problem?)
+ */
+ISR(TIMER1_OVF_vect) {
+    ICR1 = BikeHornSound::nextTop;
+    OCR1A = BikeHornSound::nextComp;
+    TIMSK1 = 0; // Disable timer 1 interrupts
+}
+
 #ifdef ENABLE_WARBLE
 /**
- * lass to create the warbling noise
+ * Class to create the warbling noise
  */
 class Warble {
     public:
@@ -112,7 +149,7 @@ class Warble {
                             updateInterval = timeStep(riseTime);
                         }
                     }
-                    soundGenerator->playFreq(frequency);
+                    soundGenerator->changeFreq(frequency);
                 }
             }
         }
@@ -126,6 +163,7 @@ class Warble {
             frequency = upper;
             isActive = true;
             updateInterval = timeStep(fallTime);
+            soundGenerator->playFreq(frequency);
         }
 
         /**
