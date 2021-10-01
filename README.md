@@ -11,5 +11,6 @@ A "musical" siren for bicycles.
 6. Upload to the Arduino and test.
 7. Mount on bicycle / vehicle and have fun.
 
-## Demo video
-TODO
+A low resolution gif that gives an idea of order of assembly:
+
+![AssemblyGIF.gif](Images/AssemblyGIF.gif)

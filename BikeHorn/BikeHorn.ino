@@ -5,7 +5,15 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 15/07/2021
+ * Last modified 19/09/2021
+ * 
+ * Requires these libraries (can be installed through the library manager):
+ *   - Low-Power (https://github.com/rocketscream/Low-Power) - Shuts things down to save power.
+ *   - TunePlayer (https://github.com/jgOhYeah/TunePlayer) - Does most of the heavy lifting playing the tunes.
+ *   - Queue (https://github.com/SMFSW/Queue) - Required by TunePlayer.
+ * 
+ * Only required if LOG_RUN_TIME is defined:
+ *   - EEPROMWearLevel (https://github.com/PRosenb/EEPROMWearLevel) - Logs to EEPROM.
  */
 
 #include "defines.h"
@@ -26,6 +34,11 @@ FlashTuneLoader flashLoader;
 BikeHornSound piezo;
 TunePlayer tune;
 uint8_t curTune = 0;
+
+#ifdef ENABLE_WARBLE
+Warble warble;
+#endif
+
 
 #ifdef LOG_RUN_TIME
 uint32_t startTime;
@@ -59,6 +72,11 @@ void setup() {
     tune.begin(&flashLoader, &piezo);
     tune.spool();
 
+#ifdef ENABLE_WARBLE
+    /// Warble mode
+    warble.begin(&piezo, WARBLE_LOWER, WARBLE_UPPER, WARBLE_RISE, WARBLE_FALL);
+#endif
+
     // Go to midi synth mode if change mode and horn button pressed or reset the eeprom.
     if(!digitalRead(BUTTON_MODE)) {
 #ifdef LOG_RUN_TIME
@@ -79,7 +97,7 @@ void setup() {
         }
         digitalWrite(LED_BUILTIN, LOW);
 
-        // Check if we left early or the full time
+        // Check if we left early or at the full time
         if(success) {
             Serial.println(F("Resetting EEPROM"));
             resetEEPROM();
@@ -102,7 +120,7 @@ void loop() {
         // Set interrupts to wake the processor up again when required
         attachInterrupt(digitalPinToInterrupt(BUTTON_HORN), wakeUpHornISR, LOW);
         attachInterrupt(digitalPinToInterrupt(BUTTON_MODE), wakeUpModeISR, LOW);
-        LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
+        LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF); // The horn will spend most of its life here
         detachInterrupt(digitalPinToInterrupt(BUTTON_HORN));
         detachInterrupt(digitalPinToInterrupt(BUTTON_MODE));
         wakeGPIO();
@@ -120,7 +138,18 @@ void loop() {
 #endif
         // Start playing
         startBoost();
+
+#ifdef ENABLE_WARBLE
+        if(curTune != tuneCount) {
+            // Normal tune playing mode
+            tune.play();
+        } else {
+            // Warble mode
+            warble.start();
+        }
+#else
         tune.play();
+#endif
 
         // Play until the button has not been pressed in the past DEBOUNCE_TIME ms.
         digitalWrite(LED_EXTERNAL, HIGH);
@@ -129,7 +158,17 @@ void loop() {
         uint32_t startTime = millis();
         uint32_t curTime = millis();
         while (curTime - startTime < DEBOUNCE_TIME) {
+
+#ifdef ENABLE_WARBLE
+            if(curTune != tuneCount) {
+                tune.update();
+            } else {
+                warble.update();
+            }
+#else
             tune.update();
+#endif
+
             static uint32_t ledStart = curTime;
             if(curTime - ledStart > 125) {
                 ledStart = curTime;
@@ -151,12 +190,27 @@ void loop() {
         // Change tune as the other button is pressed
         digitalWrite(LED_EXTERNAL, HIGH);
         curTune++;
+#ifdef ENABLE_WARBLE
+        if(curTune > tuneCount) { // Use == for the warble mode
+            curTune = 0;
+        }
+        if(curTune != tuneCount) {
+            // Change tune as normal
+#else
         if(curTune == tuneCount) {
             curTune = 0;
         }
-        Serial.print(F("Changing to tune "));
-        Serial.println(curTune);
-        flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
+#endif
+            Serial.print(F("Changing to tune "));
+            Serial.println(curTune);
+            flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
+#ifdef ENABLE_WARBLE
+        } else {
+            // Don't do anything here and select on the fly
+            Serial.println(F("Changing to warble mode"));
+
+        }
+#endif
 
         // Only let go once button is not pushed for more than DEBOUNCE_TIME
         uint32_t startTime = millis();
@@ -174,10 +228,22 @@ void loop() {
     }
 
     // Stop tune and setup for the next time
+#ifdef ENABLE_WARBLE
+    if(curTune != tuneCount) {
+        tune.stop();
+        tune.spool();
+    } else {
+        warble.stop();
+    }
+#else
     tune.stop();
     tune.spool();
+#endif
 }
 
+/**
+ * Puts the GPIO into a low power state ready for the microcontroller to sleep.
+ */
 void sleepGPIO() {
     // Shut down timers to release pins
     TCCR1A = 0;
@@ -205,6 +271,9 @@ void sleepGPIO() {
     digitalWrite(LED_BUILTIN, LOW);
 }
 
+/**
+ * Wakes and sets up the GPIO and peripheries.
+ */
 void wakeGPIO() {
     DDRD = 0x02; // Serial TX is the only output
     PORTD = 0x0E; // Idle high serial
@@ -215,25 +284,33 @@ void wakeGPIO() {
     pinMode(LED_BUILTIN, OUTPUT);
 }
 
+/**
+ * Interrupt Service Routine (ISR) called when the hirn wakes up with the horn button pressed.
+ */
 void wakeUpHornISR() {
     wakePin = horn;
 }
 
+/**
+ * Interrupt Service Routine (ISR) called when the hirn wakes up with the mode button pressed.
+ */
 void wakeUpModeISR() {
     wakePin = mode;
 }
 
-// Functions for managing the intermediate boost stage
+/**
+ * Sets up and starts the intermediate boost stage.
+ */
 void startBoost() {
     // Set PB3 to be an output (Pin11 Arduino UNO)
     DDRB |= (1 << PB3);
     
     TCCR2A = (1 << COM2A1) | (1 << WGM21) | (1 << WGM20); // Mode 3, fast PWM, reset at 255
     TCCR2B = (1<< CS20); // Prescalar 1
-    OCR2A = IDLE_DUTY; // 76.6% duty
+    OCR2A = IDLE_DUTY; // Enough duty cycle to keep the voltage on the second stage at a reasonable level.
 }
 
-/** Mode for a midi synth */
+/** Mode for a midi synth. This is blocking and will only exit on reset or if the horn button is pressed. */
 void midiSynth() {
     // Flashing lights to warn of being in this mode
     digitalWrite(LED_BUILTIN, LOW);
