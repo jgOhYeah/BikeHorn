@@ -11,6 +11,8 @@ class BikeHornSound : public TimerOneSound {
     public:
         /** Stops the sound and sets the boost pwm back to idle */
         void stopSound() {
+            TIMSK1 = 0; // Disable the interrupt for changing the piezo frequency (warble mode).
+
             // Shutdown timer 1
             TCCR1A = 0;
             TCCR1B = 0;

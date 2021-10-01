@@ -5,10 +5,10 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 19/09/2021
+ * Last modified 01/10/2021
  */
  
-#define VERSION "1.1.0"
+#define VERSION "1.1.1"
 
 #define PIEZO_PIN 9 // Fixed as PB1 (Pin 9 on Arduino Nano)
 #define BOOST_PIN 11 // Fixed as PB3 (Pin 11 on Arduino Nano)
