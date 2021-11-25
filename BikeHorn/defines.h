@@ -5,10 +5,10 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 01/10/2021
+ * Last modified 25/11/2021
  */
  
-#define VERSION "1.1.1"
+#define VERSION "1.2.1"
 
 #define PIEZO_PIN 9 // Fixed as PB1 (Pin 9 on Arduino Nano)
 #define BOOST_PIN 11 // Fixed as PB3 (Pin 11 on Arduino Nano)
@@ -21,6 +21,9 @@
 #define IDLE_DUTY 5 // 9.4% duty cycle, keeps the voltage up when not playing
 #define MIDI_CHANNEL 0 // Zero indexed, so many software shows ch. 0 as ch. 1
 #define DEBOUNCE_TIME 20
+
+// Watchdog timer to reduce lockups with a flat battery / unstable power supply
+#define ENABLE_WATCHDOG_TIMER // DO NOT enable this (uncomment it) for Arduinos running the older (pre optiboot) bootloader as this will cause lockups
 
 // Warble mode
 #define ENABLE_WARBLE // Define this to add a warble sound as a final tune (like various burgler alarms, sirens and

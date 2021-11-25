@@ -6,7 +6,7 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates. Tunes converted from various sources.
- * Last modified 19/09/2021
+ * Last modified 24/11/2021
  */
 
 
@@ -64,5 +64,16 @@ const uint16_t TakeOnMeIntroLoop[] PROGMEM = {
     0xf001 // End of tune. Restart from the beginning
 };
 
-const uint16_t *const tunes[] PROGMEM = {rossini_william_tell, TakeOnMeIntroLoop, ImperialMarchPICAXE, Final_Countdown, Cantina, beep};
+// Converted from 'BlueBikeHorn' by TunePlayer Musescore plugin V1.8.0
+const uint16_t BlueBikeHorn[] PROGMEM = {
+    0xe0b4, // Tempo change to 180 BPM
+    0x9a18,0x1a18,0x6a18,0x9a18,0xba18,0x4a18,0x8a18,0x9a38,0x6a18,0x9a18,
+    0x1c18,0x2c18,0x6a18,0x1c18,0xba18,
+    0xd410, // Repeat going back 16 notes, repeating 2 time(s)
+    0x9a18,0x1a18,0x6a18,0x9a18,0x8a18,0xb818,0x4a18,0x6a38,0x9818,0x4a18,
+    0x6a38,0x4a18,0x6a18,0x8a18,
+    0xf001 // End of tune. Restart from the beginning.
+};
+
+const uint16_t *const tunes[] PROGMEM = {rossini_william_tell, BlueBikeHorn, TakeOnMeIntroLoop, ImperialMarchPICAXE, Final_Countdown, Cantina, beep};
 const uint8_t tuneCount = sizeof(tunes) / sizeof(uint16_t);

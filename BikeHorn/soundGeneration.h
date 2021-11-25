@@ -88,7 +88,7 @@ volatile uint16_t BikeHornSound::nextComp;
 
 /**
  * Interrupt for timer overflow to change the frequency of the warble safely at the correct time in the cycle without
- * using a double bug=ffered register. The manual suggests OCR1A should be set as top as it is double buffered, however
+ * using a double buffered register. The manual suggests OCR1A should be set as top as it is double buffered, however
  * this will disable PWM on the pin I am using.
  * 
  * The risk of changing ICR1 randomly at any time is that a reset of the counter only happens when the counter equals
