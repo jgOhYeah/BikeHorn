@@ -15,10 +15,10 @@ from mpl_toolkits.mplot3d import Axes3D
 import sys
 
 # Manual coordinates to draw a straight line between for mapping the opimal settings. These will be exported to the arduino.
-boost_x = np.array([21, 47, 57, 95, 110, 127])
-boost_y = np.array([72, 72, 85, 85, 60, 60])
-piezo_x = np.array([21, 50, 90, 127])
-piezo_y = np.array([95, 95, 8, 8])
+boost_x = np.array([21, 47, 57, 95, 110, 127]) # Midi note
+boost_y = np.array([72, 72, 85, 85,  60,  60]) # Duty cycle in %
+piezo_x = np.array([21, 50, 90, 127]) # Midi note
+piezo_y = np.array([95, 95,  8,   8]) # Duty cycle in %
 
 def midi_freq(midi):
     """ Converts a midi note to a frequency. See https://newt.phys.unsw.edu.au/jw/notes.html """
@@ -89,16 +89,17 @@ if len(sys.argv) > 1:
 data = np.load(filename)
 piezo_mesh, boost_mesh = np.meshgrid(data['piezo_duty_range'], data['boost_duty_range'])
 sound_data = data['sound_data']
-adc_data = data['adc_data']
+# adc_data = data['adc_data']
 midi_notes = data['midi_notes']
 
 # Based of various examples
 # Set up a figure twice as wide as it is tall
-fig_3d = plt.figure(figsize=plt.figaspect(0.5))
+# fig_3d = plt.figure(figsize=plt.figaspect(0.5))
+fig_3d = plt.figure()
 # Set up the axes for the first plot
-ax_loudness = fig_3d.add_subplot(1, 2, 1, projection='3d')
+ax_loudness = fig_3d.add_subplot(1, 1, 1, projection='3d')
 # Second ADC Plot
-ax_adc = fig_3d.add_subplot(1, 2, 2, projection='3d')
+# ax_adc = fig_3d.add_subplot(1, 2, 2, projection='3d')
 
 # Slider for midi note (https://matplotlib.org/stable/gallery/widgets/slider_demo.html)
 # Adjust the main plot to make room for the sliders
@@ -116,12 +117,15 @@ freq_slider = Slider(
 )
 
 def update_plot(val):
+    # Make sure we don't try to use a float as an index
+    val = int(val)
+    
     # Update the title
     fig_3d.suptitle("Performance for midi note {}".format(midi_notes[val]))
 
     # Process data and get the maximum and minimum
     loudness = sound_data[val]
-    adc = adc_data[val]
+    # adc = adc_data[val]
 
     # Display subplot 1
     ax_loudness.cla()
@@ -134,14 +138,14 @@ def update_plot(val):
     ax_loudness.set_ylim3d(boost_mesh[0,0], boost_mesh[-1,-1])
 
     # Display subplot 2
-    ax_adc.cla()
-    ax_adc.set_xlabel("Piezo Duty Cycle [%]")
-    ax_adc.set_ylabel("Boost Duty Cycle [%]")
-    ax_adc.set_zlabel("ADC [0:1023]")
-    ax_adc.set_title("Boost stage ADC")
-    adc_surf = ax_adc.plot_surface(piezo_mesh, boost_mesh, adc, color='r')
-    ax_adc.set_xlim3d(piezo_mesh[0,0], piezo_mesh[-1,-1])
-    ax_adc.set_ylim3d(boost_mesh[0,0], boost_mesh[-1,-1])
+    # ax_adc.cla()
+    # ax_adc.set_xlabel("Piezo Duty Cycle [%]")
+    # ax_adc.set_ylabel("Boost Duty Cycle [%]")
+    # ax_adc.set_zlabel("ADC [0:1023]")
+    # ax_adc.set_title("Boost stage ADC")
+    # adc_surf = ax_adc.plot_surface(piezo_mesh, boost_mesh, adc, color='r')
+    # ax_adc.set_xlim3d(piezo_mesh[0,0], piezo_mesh[-1,-1])
+    # ax_adc.set_ylim3d(boost_mesh[0,0], boost_mesh[-1,-1])
 
     # Update
     fig_3d.canvas.draw_idle()
@@ -150,26 +154,26 @@ update_plot(0)
 freq_slider.on_changed(update_plot)
 
 # Make the axis move together (https://stackoverflow.com/a/41616868)
-def on_move(event):
-    if event.inaxes == ax_loudness:
-        if ax_loudness.button_pressed in ax_loudness._rotate_btn:
-            ax_adc.view_init(elev=ax_loudness.elev, azim=ax_loudness.azim)
-        elif ax_loudness.button_pressed in ax_loudness._zoom_btn:
-            ax_adc.set_xlim3d(ax_loudness.get_xlim3d())
-            ax_adc.set_ylim3d(ax_loudness.get_ylim3d())
-            ax_adc.set_zlim3d(ax_loudness.get_zlim3d())
-    elif event.inaxes == ax_adc:
-        if ax_adc.button_pressed in ax_adc._rotate_btn:
-            ax_loudness.view_init(elev=ax_adc.elev, azim=ax_adc.azim)
-        elif ax_adc.button_pressed in ax_adc._zoom_btn:
-            ax_loudness.set_xlim3d(ax_adc.get_xlim3d())
-            ax_loudness.set_ylim3d(ax_adc.get_ylim3d())
-            ax_loudness.set_zlim3d(ax_adc.get_zlim3d())
-    else:
-        return
-    fig_3d.canvas.draw_idle()
+# def on_move(event):
+#     if event.inaxes == ax_loudness:
+#         if ax_loudness.button_pressed in ax_loudness._rotate_btn:
+#             ax_adc.view_init(elev=ax_loudness.elev, azim=ax_loudness.azim)
+#         elif ax_loudness.button_pressed in ax_loudness._zoom_btn:
+#             ax_adc.set_xlim3d(ax_loudness.get_xlim3d())
+#             ax_adc.set_ylim3d(ax_loudness.get_ylim3d())
+#             ax_adc.set_zlim3d(ax_loudness.get_zlim3d())
+#     elif event.inaxes == ax_adc:
+#         if ax_adc.button_pressed in ax_adc._rotate_btn:
+#             ax_loudness.view_init(elev=ax_adc.elev, azim=ax_adc.azim)
+#         elif ax_adc.button_pressed in ax_adc._zoom_btn:
+#             ax_loudness.set_xlim3d(ax_adc.get_xlim3d())
+#             ax_loudness.set_ylim3d(ax_adc.get_ylim3d())
+#             ax_loudness.set_zlim3d(ax_adc.get_zlim3d())
+#     else:
+#         return
+#     fig_3d.canvas.draw_idle()
 
-c1 = fig_3d.canvas.mpl_connect('motion_notify_event', on_move)
+# c1 = fig_3d.canvas.mpl_connect('motion_notify_event', on_move)
 
 plt.show(block=False)
 
@@ -177,14 +181,14 @@ plt.show(block=False)
 best_boost_duty = [0] * len(sound_data)
 best_piezo_duty = [0] * len(sound_data)
 best_loudness = np.empty(len(sound_data))
-corresponding_adc = np.empty(len(sound_data))
+# corresponding_adc = np.empty(len(sound_data))
 
 for i in range(len(sound_data)):
     boost_index, piezo_index = np.unravel_index(np.argmax(sound_data[i], axis=None), sound_data[i].shape)
     best_boost_duty[i] = boost_mesh[boost_index, 0]
     best_piezo_duty[i] = piezo_mesh[0, piezo_index]
     best_loudness[i] = sound_data[i, boost_index, piezo_index]
-    corresponding_adc[i] = adc_data[i, boost_index, piezo_index]
+    # corresponding_adc[i] = adc_data[i, boost_index, piezo_index]
 
     # print("Midi: {}\tLoudness: {}\tBest boost: {}\tBest piezo: {}".format(midi_notes[i], sound_data[i, boost_index, piezo_index], best_boost_duty[i], best_piezo_duty[i]))
 
@@ -293,11 +297,11 @@ ax_loudness_best_f.set_xlabel("Frequency [Hz]")
 ax_loudness_best_f.set_ylabel("Level [no units]")
 
 # ADC
-ax_adc_f = fig_best_params_f.add_subplot(2, 2, 4)
-ax_adc_f.plot(freqs, corresponding_adc, color='g')
-ax_adc_f.set_title("Boost ADC at optimal")
-ax_adc_f.set_xlabel("Frequency [Hz]")
-ax_adc_f.set_ylabel("Boost ADC [0-1023]")
+# ax_adc_f = fig_best_params_f.add_subplot(2, 2, 4)
+# ax_adc_f.plot(freqs, corresponding_adc, color='g')
+# ax_adc_f.set_title("Boost ADC at optimal")
+# ax_adc_f.set_xlabel("Frequency [Hz]")
+# ax_adc_f.set_ylabel("Boost ADC [0-1023]")
 
 plt.subplots_adjust(hspace=0.5, wspace=0.4, top=0.88, bottom=0.11, left=0.11, right=0.96)
 plt.show()
