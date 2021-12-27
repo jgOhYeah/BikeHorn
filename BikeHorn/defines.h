@@ -5,10 +5,10 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 25/11/2021
+ * Last modified 27/12/2021
  */
  
-#define VERSION "1.2.1"
+#define VERSION "1.3.0a"
 
 #define PIEZO_PIN 9 // Fixed as PB1 (Pin 9 on Arduino Nano)
 #define BOOST_PIN 11 // Fixed as PB3 (Pin 11 on Arduino Nano)
@@ -35,9 +35,10 @@
 
 
 // Define this if you want to keep a record of run time when in horn mode for battery usage analysis.
-#define LOG_RUN_TIME
+// #define LOG_RUN_TIME
 #define LOG_VERSION 2
 
 #define MANUAL_CUTOFF // Allow notes to be stopped as we aren't using tone() to make the noises.
-
+#define EEPROM_TIMER1_PIECEWISE 1 // TODO: Work out bytes and addresses that don't interfere with EEPROM wear leveling 
+#define EEPROM_TIMER2_PIECEWISE 82 // 81 bytes for up to 10 points
 #define WELCOME_MSG "Bike horn V" VERSION " started. Compiled " __TIME__ ", " __DATE__
