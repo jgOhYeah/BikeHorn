@@ -22,10 +22,12 @@
 #include <cppQueue.h>
 #include <LowPower.h>
 #include <TunePlayer.h>
+#include <EEPROM.h>
 
 // EEPROMWearLevel is only required if LOG_RUN_TIME is defined in defines.h
 #ifdef LOG_RUN_TIME
     #include <EEPROMWearLevel.h>
+    // TODO: Fix wear level to cope with settings also being stored in EEPROM
 #endif
 
 // Only needed for the watchdog timer (DO NOT enable for Arduinos with the old bootloader).
@@ -83,6 +85,7 @@ void setup() {
 #endif
 
     // Tune Player
+    piezo.begin();
     flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
     tune.begin(&flashLoader, &piezo);
     tune.spool();
