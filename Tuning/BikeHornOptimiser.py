@@ -15,11 +15,18 @@ import sounddevice as sd
 # General
 import time
 import numpy as np
+import threading
 
 class BikeHornInterface():
-    def __init__(self, logging):
+    def __init__(self, logging, gui=None):
         self._serial_port = serial.Serial()
         self._logging = logging
+        self.set_gui(gui)
+
+    def set_gui(self, gui=None) -> None:
+        self._gui = gui
+        if self._gui:
+            self._gui.add_to_call_on_exit(self.close_port)
 
     def set_serial_port(self, port_name):
         """Sets and opens the serial port
@@ -27,8 +34,7 @@ class BikeHornInterface():
         Args:
             port_name (str): The serial port to open
         """
-        if self._serial_port.isOpen():
-            self._serial_port.close()
+        self.close_port()
 
         self._serial_port.port = port_name
         self._serial_port.baudrate = 38400
@@ -39,24 +45,28 @@ class BikeHornInterface():
             msg = "Could not open serial port '{}'".format(port_name)
             self._logging.warning(msg)
             
-
-
-    def run_test(self, gui=None):
+    def run_test(self):
         """Runs the test
         """
         self._logging.info("Running the test (when it is implemented)")
         for i in range(0, 101, 1):
             time.sleep(0.1)
-            if gui:
-                gui.update_test_progress(i)
+            if self._gui:
+                self._gui.update_test_progress(i)
         
-        # TODO
+        self._logging.info("Finished test")
     
     def get_serial_ports(self):
         """Returns a list of serial ports.
         Based off https://stackoverflow.com/a/67519864
         """
         return [i.device for i in serial.tools.list_ports.comports()]
+    
+    def close_port(self):
+        if self._serial_port.isOpen():
+            print("Closing the serial port")
+            self._serial_port.close()
+
 class GUI():
     def __init__(self, logging, bike_horn):
         """Creates and runs the GUI
@@ -116,7 +126,9 @@ class GUI():
         result = tkmb.askyesno("Confirm run test", "Are you sure you want to run a NEW test? Any previous, unsaved results will be lost.")
         if result:
             self._bike_horn.set_serial_port(self.serial_port.get())
-            self._bike_horn.run_test(self)
+            test_thread = threading.Thread(target=self._bike_horn.run_test, daemon=True)
+            # TODO: Disable buttons
+            test_thread.start()
     
     def update_test_progress(self, value):
         self._root.update_idletasks()
@@ -225,6 +237,7 @@ class AudioLevels():
         self._audio_level = 0
         self._stream = sd.InputStream(callback=self._audio_callback, blocksize=500)
         self.set_gui(gui)
+        self._stop_required = False
 
     def set_gui(self, gui=None) -> None:
         self._gui = gui
@@ -235,11 +248,14 @@ class AudioLevels():
         self._stream.start()
 
     def stop(self):
-        print("Stopping audio")
-        self._stream.abort()
-        print("Done")
+        # Make stopping part of the callback as otherwise it seems to lock up occasionally
+        self._stop_required = True
 
     def _audio_callback(self, indata, frames, time, status):
+        if self._stop_required:
+            print("Stopping audio")
+            raise sd.CallbackAbort()
+        
         self._audio_level = np.linalg.norm(indata) * 10
         if self._gui:
             self._gui.set_sound_level(self._audio_level)
@@ -248,6 +264,7 @@ if __name__ == "__main__":
     logging = Logging()
     bike_horn = BikeHornInterface(logging)
     gui = GUI(logging, bike_horn)
+    bike_horn.set_gui(gui)
     audio = AudioLevels(gui)
     logging.set_gui(gui)
     gui.draw()
