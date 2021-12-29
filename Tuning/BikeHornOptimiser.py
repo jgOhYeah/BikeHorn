@@ -6,6 +6,13 @@ from tkinter import filedialog as fd
 import tkinter.messagebox as tkmb
 import webbrowser
 
+# Graphs
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Slider
+from matplotlib.figure import Figure
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+
 # Serial
 import serial.tools.list_ports
 from serial.serialutil import SerialException
@@ -135,16 +142,20 @@ class Graphs():
     pass
 
 class BikeHornInterface():
-    def __init__(self, logging, data_manager, gui=None):
+    def __init__(self, logging, data_manager, audio=None, gui=None):
         self._serial_port = serial.Serial()
         self._logging = logging
         self._data_manager = data_manager
+        self._audio = audio
         self.set_gui(gui)
 
     def set_gui(self, gui=None) -> None:
         self._gui = gui
         if self._gui:
             self._gui.add_to_call_on_exit(self.close_port)
+    
+    def set_audio(self, audio=None) -> None:
+        self._audio = audio
 
     def set_serial_port(self, port_name):
         """Sets and opens the serial port
@@ -229,7 +240,7 @@ class BikeHornInterface():
     def _get_data_point(self, midi, boost, piezo):
         # TODO
         time.sleep(0.005)
-        return 10
+        return self._audio.get_level()
 
     def _shutdown(self, success=True):
         """Attempts to make the horn go quiet and closes the serial port"""
@@ -290,6 +301,8 @@ class GUI():
         # Fill up the tabs (after drawing the monitor so they can log to it)
         self._draw_run_test_tab(run_test_tab)
         self._draw_save_load_tab(save_load_tab)
+        self._save_settings()
+        self._draw_results_tab(view_results_tab)
         self._draw_help_tab(help_tab)
 
         self._root.protocol("WM_DELETE_WINDOW", self._close_window)
@@ -481,7 +494,28 @@ class GUI():
         self._set_current_file_text(self._data_manager.get_filename())
         ttk.Button(tab, text="Open", command=self._select_open_file).grid(row=0, column=3, padx=10, pady=10, sticky=tk.E)
         ttk.Button(tab, text="Save as", command=self._select_save_file).grid(row=0, column=4, padx=10, pady=10, sticky=tk.E)
-    
+
+    def _draw_results_tab(self, tab):
+        
+        self._results_scrollbar = ttk.Scrollbar(tab, orient='horizontal', command=self._plot_results_scroll)
+        self._results_scrollbar.pack(side=tk.TOP, fill='x')
+        self._results_fig = Figure()
+        # Based of various examples
+        self._ax_loudness = self._results_fig.gca(projection='3d')
+        self._results_cur_value = 0
+        self._data_manager.register_call_on_update(self._plot_results, True, False)
+        self._data_manager.register_call_on_update(self._update_results_scroll, True, False)
+
+        # Based off https://www.geeksforgeeks.org/how-to-embed-matplotlib-charts-in-tkinter-gui/
+        # Create the Tkinter canvas containing the Matplotlib figure
+        canvas = FigureCanvasTkAgg(self._results_fig, tab)
+        canvas.draw()
+        canvas.get_tk_widget().pack()
+        # Create the Matplotlib toolbar
+        toolbar = NavigationToolbar2Tk(canvas, tab)
+        toolbar.update()
+        canvas.get_tk_widget().pack()
+
     def _draw_help_tab(self, tab):
         ttk.Label(tab, text="Bike Horn Optimiser version {}\nBy Jotham Gates\nThis is still a work in progress. For more info, go to:".format(version)).grid(row=0, column=0, padx=10, pady=(10, 0), sticky=tk.W)
         # Link based off https://stackoverflow.com/a/23482749
@@ -490,6 +524,85 @@ class GUI():
         github_link.grid(padx=10, pady=(0, 10), sticky=tk.W, row=1, column=0)
         github_link.bind("<Button-1>", lambda e: webbrowser.open_new_tab(github))
         ttk.Label(tab, text="MAIN STEPS:\n1. Upload the optimising sketch to the horn.\n2. Run or open a test.\n3. Upload the optimised settings to the horn.\n4. Upload the main bike horn sketch to put the horn back in power saving mode.").grid(padx=10, pady=10, row=2, column=0, sticky=tk.W)
+    
+    def _plot_results_scroll(self, instruction=None, amount=None, units=None):
+        max_index = len(self._data_manager.get_sound_data())-1
+        if instruction == tk.SCROLL:
+            amount = int(amount)
+            # Move one unit at a time (clicking on arrows at ends)
+            if amount > 0 and self._results_cur_value < max_index:
+                self._plot_results(self._results_cur_value + 1)
+            if amount < 0 and self._results_cur_value > 0:
+                self._plot_results(self._results_cur_value - 1)
+            self._update_results_scroll()
+
+        elif instruction == tk.MOVETO:
+            # Convert float to an index
+            amount = float(amount)
+            max_index = len(self._data_manager.get_sound_data())-1
+            amount = max(min(round(max_index*amount) / max_index, 1), 0)
+            self._update_results_scroll(amount)
+            if max_index >= 0:
+                self._plot_results(max_index*amount)
+    
+    def _update_results_scroll(self, position=None):
+        width = 1/max(len(self._data_manager.get_sound_data())-1, 1)
+        if position is None:
+            position = self._results_cur_value * width
+        operating_range = 1-width
+        left = min(max(position * operating_range, 0), operating_range)
+        right = left + width
+        self._results_scrollbar.set(left, right)
+
+    def _plot_results(self, val=None):
+        # Index to search for
+        sound_data = np.array(self._data_manager.get_sound_data())
+        if val is not None:
+            val = int(val)
+        else:
+            # Not specified, if not on the last one, stay the same, otherwise go to latest
+            if self._results_cur_value < len(sound_data)-2:
+                val = self._results_cur_value
+                print("Using current")
+            else:
+                val = len(sound_data)-1
+                print("Going to front")
+        
+        self._results_cur_value = val
+        self._logging.info("Plotting data point {}".format(val))
+        # Update the title
+        settings = self._data_manager.get_settings()
+        try:
+            midi_note = int(settings["midi_note_inc"])*val + int(settings["midi_note_min"])
+            piezo_mesh, boost_mesh = np.meshgrid(
+                range(
+                    int(settings["piezo_duty_min"]), int(settings["piezo_duty_max"])+1, int(settings["piezo_duty_inc"])
+                ),
+                range(
+                    int(settings["boost_duty_min"]), int(settings["boost_duty_max"])+1, int(settings["boost_duty_inc"])
+                )
+            )
+        except (KeyError, ValueError):
+            self._logging.error("Error drawing results plot - cannot use settings given")
+            return
+
+        self._results_fig.suptitle("Performance for midi note {}".format(midi_note))
+
+        # Process data and get the maximum and minimum
+        sound_data = np.array(self._data_manager.get_sound_data())
+        loudness = sound_data[val]
+
+        # Display subplot 1
+        self._ax_loudness.cla()
+        self._ax_loudness.set_xlabel("Piezo Duty Cycle [%]")
+        self._ax_loudness.set_ylabel("Boost Duty Cycle [%]")
+        self._ax_loudness.set_zlabel("Loudness")
+        self._ax_loudness.plot_surface(piezo_mesh, boost_mesh, loudness, color="b")
+        self._ax_loudness.set_xlim3d(piezo_mesh[0,0], piezo_mesh[-1,-1])
+        self._ax_loudness.set_ylim3d(boost_mesh[0,0], boost_mesh[-1,-1])
+
+        # Update
+        self._results_fig.canvas.draw_idle()
 
     def _set_current_file_text(self, text):
         self._current_file_text.configure(state='normal')
@@ -530,7 +643,6 @@ class GUI():
             i()
         
         # Dodgy bit to make stuff close in the right order
-        time.sleep(1)
         self._root.destroy()
 
 class Logging():
@@ -576,6 +688,7 @@ class AudioLevels():
             self._gui.add_to_call_on_exit(self.stop)
 
     def start(self):
+        self._stop_required = False
         self._stream.start()
 
     def stop(self):
@@ -583,9 +696,17 @@ class AudioLevels():
         print("Audio stop required")
         self._stop_required = True
 
+        # Wait until we know it stops
+        while self._stop_required:
+            time.sleep(0.1)
+    
+    def get_level(self):
+        return self._audio_level
+
     def _audio_callback(self, indata, frames, time, status):
         if self._stop_required:
             print("Stopping audio")
+            self._stop_required = False
             raise sd.CallbackAbort()
         
         self._audio_level = np.linalg.norm(indata) * 10
@@ -599,6 +720,7 @@ if __name__ == "__main__":
     gui = GUI(logging, bike_horn, data_manager)
     bike_horn.set_gui(gui)
     audio = AudioLevels(gui)
+    bike_horn.set_audio(audio)
     logging.set_gui(gui)
     gui.draw()
     audio.start()
