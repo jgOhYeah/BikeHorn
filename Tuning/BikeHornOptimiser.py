@@ -3,6 +3,7 @@
 import tkinter as tk                    
 from tkinter import ttk
 import tkinter.messagebox as tkmb
+from typing import Iterable
 
 # Serial
 import serial.tools.list_ports
@@ -16,6 +17,13 @@ import sounddevice as sd
 import time
 import numpy as np
 import threading
+
+class ResultsManager():
+    # For generating the functions:
+    # 1. Smooth the data
+    # 2. Numpy has a piecewise functions tool
+    # Have the number of functions as an option in the gui?
+    pass
 
 class BikeHornInterface():
     def __init__(self, logging, gui=None):
@@ -45,17 +53,40 @@ class BikeHornInterface():
             msg = "Could not open serial port '{}'".format(port_name)
             self._logging.warning(msg)
             
-    def run_test(self):
+    def run_test(self, piezo_duty_values:Iterable, boost_duty_values:Iterable, midi_values:Iterable):
         """Runs the test
+
+        Args:
+            piezo_duty_values (Iterable): The values to test for the piezo duty cycle (%)
+            boost_duty_Values (Iterable): The values to test for the boost duty cycle (%)
+            midi_values (Iterable): The values to test for the midi note (0-127)
         """
-        self._logging.info("Running the test (when it is implemented)")
-        for i in range(0, 101, 1):
-            time.sleep(0.1)
-            if self._gui:
-                self._gui.update_test_progress(i)
+        self._abort = False
+
+        # Progress bar
+        total_steps = len(piezo_duty_values) * len(boost_duty_values) * len(midi_values)
+        self._logging.info("Running the test (when it is implemented) with {} points to test".format(total_steps))
+        current_step = 0
         
+        for midi in midi_values:
+            for piezo in piezo_duty_values:
+                for boost in boost_duty_values:
+                    percent_done = current_step / total_steps * 100
+                    # self._logging.info("MIDI Note: {}, Piezo: {}, Boost: {}, {}% done".format(midi, piezo, boost, percent_done))
+                    if self._gui:
+                        self._gui.update_test_progress(percent_done)
+                    
+                    time.sleep(0.01)
+                    current_step += 1
+
+                    if self._abort:
+                        self._logging.info("Aborting the test")
+                        self._shutdown(False)
+                        return
+
+        self._shutdown()
         self._logging.info("Finished test")
-    
+
     def get_serial_ports(self):
         """Returns a list of serial ports.
         Based off https://stackoverflow.com/a/67519864
@@ -66,6 +97,19 @@ class BikeHornInterface():
         if self._serial_port.isOpen():
             print("Closing the serial port")
             self._serial_port.close()
+    
+    def abort_test(self):
+        """Sets the flag to stop testing
+        """
+        self._abort = True
+    
+    def _shutdown(self, success=True):
+        """Attempts to make the horn go quiet and closes the serial port"""
+        # TODO
+        self._logging.info("Attempted to shut down (when implemented)")
+
+        if self._gui:
+            self._gui.test_finished(success)
 
 class GUI():
     def __init__(self, logging, bike_horn):
@@ -87,7 +131,7 @@ class GUI():
         # Draw the tabbed layout
         tab_control = ttk.Notebook(self._root)
         run_test_tab = ttk.Frame(tab_control)  
-        tab_control.add(run_test_tab, text ='Run test', )
+        tab_control.add(run_test_tab, text ='Run test / Serial', )
         save_load_tab = ttk.Frame(tab_control)
         tab_control.add(save_load_tab, text ='Save / Load results')
         view_results_tab = ttk.Frame(tab_control)
@@ -125,11 +169,35 @@ class GUI():
         """
         result = tkmb.askyesno("Confirm run test", "Are you sure you want to run a NEW test? Any previous, unsaved results will be lost.")
         if result:
-            self._bike_horn.set_serial_port(self.serial_port.get())
-            test_thread = threading.Thread(target=self._bike_horn.run_test, daemon=True)
-            # TODO: Disable buttons
-            test_thread.start()
+            try:
+                # +1 as people would expect top value to be included
+                piezo_range = range(int(self._piezo_duty_min_text.get()), int(self._piezo_duty_max_text.get())+1, int(self._piezo_duty_inc_text.get()))
+                boost_range = range(int(self._boost_duty_min_text.get()), int(self._boost_duty_max_text.get())+1, int(self._boost_duty_inc_text.get()))
+                midi_range = range(int(self._midi_min_text.get()), int(self._midi_max_text.get())+1, int(self._midi_inc_text.get()))
+            except ValueError:
+                self._logging.error("Error interpreting test parameters as integers")
+            else:
+                self._bike_horn.set_serial_port(self.serial_port.get())
+                test_thread = threading.Thread(target=self._bike_horn.run_test, args=(piezo_range, boost_range, midi_range), daemon=True)
+                # TODO: Disable buttons
+                # TODO: Cancel button
+                test_thread.start()
+                self._test_control_button['text'] = "ABORT Test"
+                self._test_control_button['command'] = self.confirm_abort_test
     
+    def confirm_abort_test(self):
+        """Confirms the user is sure they want to abort the test"""
+        result = tkmb.askokcancel("Abort the test", "Are you sure you can to abort the test? Any results up until the current note will be saved in {}".format("TODO")) # TODO
+        self._bike_horn.abort_test()
+    
+    def test_finished(self, success):
+        self._test_control_button['text'] = "Start Test"
+        self._test_control_button['command'] = self.confirm_run_test
+
+        # Set the progress bar to 0 if note successful
+        if not success:
+            self.update_test_progress(0)
+
     def update_test_progress(self, value):
         self._root.update_idletasks()
         self._test_progress['value'] = value
@@ -147,6 +215,7 @@ class GUI():
         self._text_messages.configure(state='normal')
         self._text_messages.insert('end', "{}{}".format(msg,end))
         self._text_messages.configure(state='disabled')
+        self._text_messages.yview()
 
     def set_sound_level(self, level):
         try:
@@ -170,30 +239,60 @@ class GUI():
         self._serial_port_dropdown.grid(column=1, row=0, padx=10, pady=10, sticky=tk.EW, columnspan=3)
 
         # Sound device
-        # TODO: Put it here?
-        ttk.Label(tab, text="Audio level:").grid(row=1, column=0, padx=10, pady=10, sticky=tk.W)
+        # TODO: This feels like it should be put elsewhere
+        ttk.Label(tab, text="Audio level (preview):").grid(row=1, column=0, padx=10, pady=10, sticky=tk.W)
         self._sound_progress = ttk.Progressbar(tab, orient=tk.HORIZONTAL, mode='determinate')
         self._sound_progress.grid(column=1, row=1, columnspan=3, sticky=tk.NSEW, padx=10, pady=10)
 
         # Sweep settings
+        # TODO: Increments - duty cycles and midi notes?
+        # TODO: Checkbox to include 0?
         ttk.Label(tab, text="Piezo duty min (%):").grid(row=2, padx=10, pady=10, sticky=tk.W)
-        ttk.Spinbox(tab).grid(row=2, column=1, padx=10, pady=10, sticky=tk.W)
+        self._piezo_duty_min_text = tk.StringVar(value=5)
+        piezo_duty_min_spinbox = ttk.Spinbox(tab, from_=0, to=100, textvariable=self._piezo_duty_min_text)
+        piezo_duty_min_spinbox.grid(row=2, column=1, padx=10, pady=10, sticky=tk.W)
         ttk.Label(tab, text="Piezo duty max (%):").grid(row=2, column=2, padx=10, pady=10, sticky=tk.W)
-        ttk.Spinbox(tab).grid(row=2, column=3, padx=10, pady=10, sticky=tk.W)
+        self._piezo_duty_max_text = tk.StringVar(value=75)
+        piezo_duty_max_spinbox = ttk.Spinbox(tab, from_=0, to=100, textvariable=self._piezo_duty_max_text)
+        piezo_duty_max_spinbox.grid(row=2, column=3, padx=10, pady=10, sticky=tk.W)
         ttk.Label(tab, text="Boost duty min (%):").grid(row=3, padx=10, pady=10, sticky=tk.W)
-        ttk.Spinbox(tab).grid(row=3, column=1, padx=10, pady=10, sticky=tk.W)
+        self._boost_duty_min_text = tk.StringVar(value=40)
+        boost_duty_min_spinbox = ttk.Spinbox(tab,  from_=0, to=100, textvariable=self._boost_duty_min_text)
+        boost_duty_min_spinbox.grid(row=3, column=1, padx=10, pady=10, sticky=tk.W)
         ttk.Label(tab, text="Boost duty max (%):").grid(row=3, column=2, padx=10, pady=10, sticky=tk.W)
-        ttk.Spinbox(tab).grid(row=3, column=3, padx=10, pady=10, sticky=tk.W)
+        self._boost_duty_max_text = tk.StringVar(value=90)
+        boost_duty_max_spinbox = ttk.Spinbox(tab,  from_=0, to=100, textvariable=self._boost_duty_max_text)
+        boost_duty_max_spinbox.grid(row=3, column=3, padx=10, pady=10, sticky=tk.W)
         ttk.Label(tab, text="MIDI note min:").grid(row=4, padx=10, pady=10, sticky=tk.W)
-        ttk.Spinbox(tab).grid(row=4, column=1, padx=10, pady=10, sticky=tk.W)
+        self._midi_min_text = tk.StringVar(value=20)
+        midi_min_spinbox = ttk.Spinbox(tab,  from_=0, to=127, textvariable=self._midi_min_text)
+        midi_min_spinbox.grid(row=4, column=1, padx=10, pady=10, sticky=tk.W)
         ttk.Label(tab, text="MIDI note max:").grid(row=4, column=2, padx=10, pady=10, sticky=tk.W)
-        ttk.Spinbox(tab).grid(row=4, column=3, padx=10, pady=10, sticky=tk.W)
+        self._midi_max_text = tk.StringVar(value=127)
+        midi_max_spinbox = ttk.Spinbox(tab,  from_=0, to=127, textvariable=self._midi_max_text)
+        midi_max_spinbox.grid(row=4, column=3, padx=10, pady=10, sticky=tk.W)
+        # Increments (6 columns)
+        increments_frame = tk.Frame(tab)
+        ttk.Label(increments_frame, text="Piezo duty increment (%):").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
+        self._piezo_duty_inc_text = tk.StringVar(value=5)
+        piezo_duty_inc_spinbox = ttk.Spinbox(increments_frame,  from_=0, to=100, textvariable=self._piezo_duty_inc_text, width=10)
+        piezo_duty_inc_spinbox.grid(row=0, column=1, padx=10, pady=10, sticky=tk.W)
+        ttk.Label(increments_frame, text="Boost duty increment (%):").grid(row=0, column=2, padx=10, pady=10, sticky=tk.W)
+        self._boost_duty_inc_text = tk.StringVar(value=5)
+        boost_duty_inc_spinbox = ttk.Spinbox(increments_frame,  from_=0, to=100, textvariable=self._boost_duty_inc_text, width=10)
+        boost_duty_inc_spinbox.grid(row=0, column=3, padx=10, pady=10, sticky=tk.W)
+        ttk.Label(increments_frame, text="MIDI note increment:").grid(row=0, column=4, padx=10, pady=10, sticky=tk.W)
+        self._midi_inc_text = tk.StringVar(value=5)
+        midi_inc_spinbox = ttk.Spinbox(increments_frame,  from_=0, to=100, textvariable=self._midi_inc_text, width=10)
+        midi_inc_spinbox.grid(row=0, column=5, padx=10, pady=10, sticky=tk.W)
+        increments_frame.grid(row=5, column=0, columnspan=4, sticky=tk.NSEW)
 
         # Run test and progress bar
-        ttk.Button(tab, text="Start test", command=self.confirm_run_test).grid(row=5, padx=10, pady=10, columnspan=4, sticky=tk.NSEW)
+        self._test_control_button = ttk.Button(tab, text="Start test", command=self.confirm_run_test)
+        self._test_control_button.grid(row=6, padx=10, pady=10, columnspan=4, sticky=tk.NSEW)
 
         self._test_progress = ttk.Progressbar(tab, orient=tk.HORIZONTAL, mode='determinate', length=800)
-        self._test_progress.grid(column=0, row=6, columnspan=4, sticky=tk.NSEW, padx=10, pady=10)
+        self._test_progress.grid(column=0, row=7, columnspan=4, sticky=tk.NSEW, padx=10, pady=10)
 
     def _draw_save_load_tab(self, tab):
         pass
@@ -204,6 +303,9 @@ class GUI():
         self._logging.info("Closing")
         for i in self._call_on_exit:
             i()
+        
+        # Dodgy bit to make stuff close in the right order
+        time.sleep(1)
         self._root.destroy()
 
 class Logging():
@@ -249,6 +351,7 @@ class AudioLevels():
 
     def stop(self):
         # Make stopping part of the callback as otherwise it seems to lock up occasionally
+        print("Audio stop required")
         self._stop_required = True
 
     def _audio_callback(self, indata, frames, time, status):
