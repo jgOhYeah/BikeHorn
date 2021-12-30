@@ -216,12 +216,18 @@ class BikeHornInterface():
 
         self._serial_port.port = port_name
         self._serial_port.baudrate = BikeHornInterface.BAUD
-        self._serial_port.timeout = 15
+        self._serial_port.timeout = 60
+
+        # Test the port
+        self._logging.info("Testing the serial port - ", end="")
         try:
             self._serial_port.open()
+            self._serial_port.close()
         except SerialException:
             msg = "Could not open serial port '{}'".format(port_name)
             self._logging.warning(msg)
+        else:
+            self._logging.info("Success")
             
     def run_test(self, piezo_duty_values:Iterable, boost_duty_values:Iterable, midi_values:Iterable):
         """Runs the test
@@ -233,42 +239,43 @@ class BikeHornInterface():
         """
         self._abort = False
         sound_data = []
+        
+        self._start_test()
+        if not self._abort:
+            # Progress bar
+            total_steps = len(piezo_duty_values) * len(boost_duty_values) * len(midi_values)
+            self._logging.info("Running the test (when it is implemented) with {} points to test".format(total_steps))
+            current_step = 0
 
-        # Progress bar
-        total_steps = len(piezo_duty_values) * len(boost_duty_values) * len(midi_values)
-        self._logging.info("Running the test (when it is implemented) with {} points to test".format(total_steps))
-        current_step = 0
+            for midi in midi_values:
+                sound_midi_data = []
+                for boost in boost_duty_values:
+                    sound_boost_data = []
+                    for piezo in piezo_duty_values:
+                        # Progress bar stuff
+                        percent_done = current_step / total_steps * 100
+                        self._logging.info("MIDI Note: {}, Piezo: {}, Boost: {}, {:.1f}% done".format(midi, piezo, boost, percent_done))
+                        if self._gui:
+                            self._gui.update_test_progress(percent_done)
+                        
+                        # The actual communicating and testing part
+                        sound_boost_data.append(self._get_data_point(midi, boost, piezo))
 
-        for midi in midi_values:
-            sound_midi_data = []
-            for boost in boost_duty_values:
-                sound_boost_data = []
-                for piezo in piezo_duty_values:
-                    # Progress bar stuff
-                    percent_done = current_step / total_steps * 100
-                    self._logging.info("MIDI Note: {}, Piezo: {}, Boost: {}, {:.1f}% done".format(midi, piezo, boost, percent_done))
-                    if self._gui:
-                        self._gui.update_test_progress(percent_done)
-                    
-                    
-                    # The actual communicating and testing part
-                    sound_boost_data.append(self._get_data_point(midi, boost, piezo))
+                        # Other housekeeping
+                        current_step += 1
+                        if self._abort:
+                            self._logging.info("Aborting the test")
+                            self._shutdown(False)
+                            return
 
-                    # Other housekeeping
-                    current_step += 1
-                    if self._abort:
-                        self._logging.info("Aborting the test")
-                        self._shutdown(False)
-                        return
+                    sound_midi_data.append(sound_boost_data)
+                sound_data.append(sound_midi_data)
+                data_manager.set_sound_data(sound_data)
+                data_manager.save_data(backup=True)
 
-                sound_midi_data.append(sound_boost_data)
-            sound_data.append(sound_midi_data)
-            data_manager.set_sound_data(sound_data)
-            data_manager.save_data(backup=True)
-
-        # Finished the test successfully
-        self._shutdown()
-        self._logging.info("Finished the test successfully", True)
+            # Finished the test successfully
+            self._shutdown()
+            self._logging.info("Finished the test successfully", True)
 
     def get_serial_ports(self):
         """Returns a list of serial ports.
@@ -278,7 +285,7 @@ class BikeHornInterface():
     
     def close_port(self):
         if self._serial_port.isOpen():
-            print("Closing the serial port")
+            self._logging.info("Closing the serial port")
             self._serial_port.close()
     
     def abort_test(self):
@@ -297,15 +304,75 @@ class BikeHornInterface():
         return round(counter_top * duty / 100)
 
     def _get_data_point(self, midi, boost, piezo):
-        # TODO
-        time.sleep(0.005)
-        return self._audio.get_level()
+        if self._serial_port.isOpen():
+            # Write to serial port
+            t1_top = self.midi_to_counter_top(midi)
+            t1_compare = self.duty_to_counter_compare(piezo, t1_top)
+            t2_compare = self.duty_to_counter_compare(boost, BikeHornInterface.TIMER_2_TOP)
+            self._serial_port.write("~`~`p{}~{}~{}`~`~".format(t1_top, t1_compare, t2_compare).encode('UTF-8'))
+            
+            # Wait for acknowledge
+            response = self._serial_port.read_until("`~`~".encode('UTF-8'))
+            if "~`~`Ack`~`~" not in str(response):
+                self._logging.error("Lost connection to horn - no acknowledge received")
+                self.abort_test()
+                return 0
+            
+            time.sleep(0.1) # A short while to let things stabilise
+            return self._audio.get_level()
+        else:
+            self._logging.error("Lost connection to horn - serial port closed unexpectedly")
+            self.abort_test()
+
+
+    def _start_test(self):
+        self._logging.info("Opening the serial port")
+        try:
+            self._serial_port.open()
+        except SerialException:
+            msg = "Could not open serial port"
+            self._logging.warning(msg)
+            return
+        
+        if self._serial_port.isOpen():
+            response = self._serial_port.read_until("`~`~".encode('UTF-8'))
+            print(response)
+            if "~`~`Ready`~`~" not in str(response):
+                # Failure
+                self._logging.error("Did not get a response from the the horn")
+                self.abort_test()
+        else:
+            # Port closed
+            self._logging.error("Serial port is closed")
+            self.abort_test()
+    
+    def _shut_up(self, require_response=True):
+        if self._serial_port.isOpen():
+            self._serial_port.write("~`~`s`~`~".encode('UTF-8'))
+        
+            # Wait for acknowledge
+            if require_response:
+                response = self._serial_port.read_until("`~`~".encode('UTF-8'))
+                if "~`~`Ack`~`~" not in str(response):
+                    self._logging.error("Lost connection to horn - no acknowledge received")
+                    self.abort_test()
+        elif require_response:
+            self._logging.error("Lost connection to horn - serial port closed unexpectedly")
+            self.abort_test()
 
     def _shutdown(self, success=True):
-        """Attempts to make the horn go quiet and closes the serial port"""
-        # TODO
-        self._logging.info("Attempted to shut down (when implemented)")
-
+        """Attempts to make the horn go quiet"""
+        self._logging.info("Attempted to shut down")
+        self._shut_up(False)
+        if self._serial_port.isOpen():
+            self._logging.info("Closing the serial port")
+            try:
+                self._serial_port.close()
+            except SerialException:
+                msg = "Could not close serial port"
+                self._logging.warning(msg)
+                return
+        
         if self._gui:
             self._gui.test_finished(success)
 
@@ -676,7 +743,6 @@ class GUI():
         ttk.Label(tab, text="MAIN STEPS:\n1. Upload the optimising sketch to the horn.\n2. Run or open a test.\n3. Upload the optimised settings to the horn.\n4. Upload the main bike horn sketch to put the horn back in power saving mode.").grid(padx=10, pady=10, row=2, column=0, sticky=tk.W)
     
     def _plot_optimisation(self):
-        self._logging.info("Plotting optimisation: {}".format(self._optimiser_show_counters.get()))
         self._ax_boost_best.clear()
         self._ax_piezo_best.clear()
         if self._optimiser_show_counters.get():
@@ -833,10 +899,10 @@ class Logging():
     def set_gui(self, gui=None) -> None:
         self._gui = gui
 
-    def info(self, msg="", dialog=False) -> None:
+    def info(self, msg="", end="\n", dialog=False) -> None:
         print(msg)
         if self._gui:
-            self._gui.add_monitor_text(msg)
+            self._gui.add_monitor_text(msg, end)
             if dialog:
                 self._gui.info_dialog(msg)
 
