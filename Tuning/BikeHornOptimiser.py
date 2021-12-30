@@ -12,6 +12,7 @@ from matplotlib.widgets import Slider
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from numpy.core.fromnumeric import var
 
 # Serial
 import serial.tools.list_ports
@@ -27,6 +28,10 @@ import numpy as np
 import threading
 from typing import Iterable
 import datetime
+
+import faulthandler; faulthandler.enable() # TODO: Remove when segmentation fault is found
+
+# TODO: Load / save a default settings file automatically (not necessary, but might be convenient)
 
 version = "0.0.1a"
 
@@ -128,6 +133,48 @@ class DataManager():
         if call_on_settings_data:
             self._to_call_on_update_settings.append(method)
     
+    def get_piezo_range(self):
+        try:
+            piezo_range = range(
+                int(self._settings["piezo_duty_min"]),
+                int(self._settings["piezo_duty_max"])+1,
+                int(self._settings["piezo_duty_inc"])
+            )
+        except (KeyError, ValueError):
+            self._logging.error("Error during processing - cannot use the piezo settings given")
+        else:
+            return piezo_range
+        return None
+    
+    def get_boost_range(self):
+        try:
+            boost_range = range(
+                int(self._settings["boost_duty_min"]),
+                int(self._settings["boost_duty_max"])+1,
+                int(self._settings["boost_duty_inc"])
+            )
+        except (KeyError, ValueError):
+            self._logging.error("Error during processing - cannot use the boost settings given")
+        else:
+            return boost_range
+        return None
+
+    def get_midi_range(self):
+        try:
+            midi_range = range(
+                int(self._settings["midi_note_min"]),
+                int(self._settings["midi_note_max"])+1,
+                int(self._settings["midi_note_inc"])
+            )
+        except (KeyError, ValueError):
+            self._logging.error("Error during processing - cannot use the midi settings given")
+        else:
+            return midi_range
+        return None
+    
+    def __len__(self):
+        return len(self._sound_data)
+
     def _call_to_update_sound(self):
         for i in self._to_call_on_update_sound:
             i()
@@ -135,13 +182,15 @@ class DataManager():
     def _call_to_update_settings(self):
         for i in self._to_call_on_update_settings:
             i()
-        
-
-class Graphs():
-    # TODO
-    pass
 
 class BikeHornInterface():
+    BAUD = 38400
+    CLOCK = 16000000
+    TIMER_1_PRESCALER = 8
+    TIMER_2_PRESCALAR = 1
+    TIMER_2_TOP = 255
+    
+
     def __init__(self, logging, data_manager, audio=None, gui=None):
         self._serial_port = serial.Serial()
         self._logging = logging
@@ -166,7 +215,7 @@ class BikeHornInterface():
         self.close_port()
 
         self._serial_port.port = port_name
-        self._serial_port.baudrate = 38400
+        self._serial_port.baudrate = BikeHornInterface.BAUD
         self._serial_port.timeout = 15
         try:
             self._serial_port.open()
@@ -237,6 +286,16 @@ class BikeHornInterface():
         """
         self._abort = True
     
+    def midi_to_freq(self, midi):
+        # Useful resource for midi note and frequencies: https://newt.phys.unsw.edu.au/jw/notes.html
+        return 2**((midi-69)/12) * 440
+
+    def midi_to_counter_top(self, midi):
+        return round(BikeHornInterface.CLOCK/BikeHornInterface.TIMER_1_PRESCALER/self.midi_to_freq(midi))
+
+    def duty_to_counter_compare(self, duty, counter_top):
+        return round(counter_top * duty / 100)
+
     def _get_data_point(self, midi, boost, piezo):
         # TODO
         time.sleep(0.005)
@@ -250,13 +309,83 @@ class BikeHornInterface():
         if self._gui:
             self._gui.test_finished(success)
 
+class Optimiser():
+    def __init__(self, logging, data_manager:DataManager, bike_horn:BikeHornInterface, gui=None):
+        self._data_manager = data_manager
+        self._logging = logging
+        self._bike_horn = bike_horn
+        self._gui = gui
+        self._call_on_recalculate = []
+        self._data_manager.register_call_on_update(self._recalculate, True, False)
+        self._best_boost_duty = []
+        self._best_piezo_duty = []
+        self._best_loudness = np.empty(1)
+    
+    def set_gui(self, gui=None):
+        self._gui = gui
+
+    def register_call_on_recalculate(self, method):
+        self._call_on_recalculate.append(method)
+    
+    def _recalculate(self):
+        sound_data = np.array(self._data_manager.get_sound_data())
+
+        # Calculate and display the best coordinates
+        self._best_boost_duty = [0] * len(sound_data)
+        self._best_piezo_duty = [0] * len(sound_data)
+        self._best_loudness = np.empty(len(sound_data))
+
+        boost_range = self._data_manager.get_boost_range()
+        piezo_range = self._data_manager.get_piezo_range()
+        if boost_range is not None and piezo_range is not None:
+            for i in range(len(sound_data)):
+                boost_index, piezo_index = np.unravel_index(np.argmax(sound_data[i], axis=None), sound_data[i].shape)
+                self._best_boost_duty[i] = boost_range[boost_index]
+                self._best_piezo_duty[i] = piezo_range[piezo_index]
+                self._best_loudness[i] = sound_data[i, boost_index, piezo_index]
+        
+        # Call on recalculate
+        for i in self._call_on_recalculate:
+            i()
+    
+    def get_best_boost(self):
+        return self._best_boost_duty
+
+    def get_best_piezo(self):
+        return self._best_piezo_duty
+    
+    def get_best_loudness(self):
+        return self._best_loudness
+    
+    def get_best_t2_compare(self):
+        result = []
+        for i in self._best_boost_duty:
+            result.append(self._bike_horn.duty_to_counter_compare(i, BikeHornInterface.TIMER_2_TOP))
+
+        return result
+    
+    def get_best_t1_compare(self):
+        result = []
+        t1_tops = self.get_t1_tops()
+        for index, duty in enumerate(self._best_piezo_duty):
+            result.append(self._bike_horn.duty_to_counter_compare(duty, t1_tops[index]))
+
+        return result
+    
+    def get_t1_tops(self):
+        midi_range = self._data_manager.get_midi_range()
+        return [self._bike_horn.midi_to_counter_top(i) for i in midi_range]
+
+
+
 class GUI():
-    def __init__(self, logging, bike_horn:BikeHornInterface, data_manager:DataManager):
+    def __init__(self, logging, bike_horn:BikeHornInterface, data_manager:DataManager, optimiser:Optimiser):
         """Creates and runs the GUI
         """
         self._logging = logging
         self._bike_horn = bike_horn
         self._data_manager = data_manager
+        self._optimiser = optimiser
         self._call_on_exit = []
 
         self._data_manager.register_call_on_update(self.set_settings, False, True)
@@ -278,10 +407,8 @@ class GUI():
         tab_control.add(save_load_tab, text ='Save / Load results')
         view_results_tab = ttk.Frame(tab_control)
         tab_control.add(view_results_tab, text='View results')
-        timer1_settings_tab = ttk.Frame(tab_control)
-        tab_control.add(timer1_settings_tab, text ='Timer 1 optimisation')
-        timer2_settings_tab = ttk.Frame(tab_control)
-        tab_control.add(timer2_settings_tab, text ='Timer 2 optimisation')
+        optimisation_tab = ttk.Frame(tab_control)
+        tab_control.add(optimisation_tab, text ='Optimisation')
         upload_settings_tab = ttk.Frame(tab_control)
         tab_control.add(upload_settings_tab, text ='View / Upload Optimisations')
         help_tab = ttk.Frame(tab_control)
@@ -303,6 +430,7 @@ class GUI():
         self._draw_save_load_tab(save_load_tab)
         self._save_settings()
         self._draw_results_tab(view_results_tab)
+        self._draw_optimisation_tab(optimisation_tab)
         self._draw_help_tab(help_tab)
 
         self._root.protocol("WM_DELETE_WINDOW", self._close_window)
@@ -489,16 +617,15 @@ class GUI():
 
     def _draw_save_load_tab(self, tab):
         ttk.Label(tab, text="Current file:").grid(row=0, column=0, sticky=tk.W, padx=10, pady=10)
-        self._current_file_text = tk.Text(tab, height=1, padx=5, pady=5)
+        self._current_file_text = tk.Text(tab, width=70, height=2, padx=5, pady=5)
         self._current_file_text.grid(row=0, column=1, sticky=tk.NSEW, padx=10, pady=10)
         self._set_current_file_text(self._data_manager.get_filename())
         ttk.Button(tab, text="Open", command=self._select_open_file).grid(row=0, column=3, padx=10, pady=10, sticky=tk.E)
         ttk.Button(tab, text="Save as", command=self._select_save_file).grid(row=0, column=4, padx=10, pady=10, sticky=tk.E)
 
+        # TODO: Show metadata and settings - possibly in a text box
+
     def _draw_results_tab(self, tab):
-        
-        self._results_scrollbar = ttk.Scrollbar(tab, orient='horizontal', command=self._plot_results_scroll)
-        self._results_scrollbar.pack(side=tk.TOP, fill='x')
         self._results_fig = Figure()
         # Based of various examples
         self._ax_loudness = self._results_fig.gca(projection='3d')
@@ -511,6 +638,29 @@ class GUI():
         canvas = FigureCanvasTkAgg(self._results_fig, tab)
         canvas.draw()
         canvas.get_tk_widget().pack()
+
+        # Scroll bar
+        self._results_scrollbar = ttk.Scrollbar(tab, orient='horizontal', command=self._plot_results_scroll)
+        self._results_scrollbar.pack(fill='x')
+        
+        # Create the Matplotlib toolbar
+        toolbar = NavigationToolbar2Tk(canvas, tab)
+        toolbar.update()
+        canvas.get_tk_widget().pack()
+    
+    def _draw_optimisation_tab(self, tab):
+        self._optimiser_show_counters = tk.IntVar()
+        self._optimiser_fig = Figure()
+        self._optimiser_fig.suptitle("Parameters for best performance of each note")
+        self._ax_boost_best = self._optimiser_fig.add_subplot(2, 1, 1)
+        self._ax_piezo_best = self._optimiser_fig.add_subplot(2, 1, 2)
+        self._plot_optimisation()
+        self._optimiser_fig.subplots_adjust(hspace=0.5)
+        canvas = FigureCanvasTkAgg(self._optimiser_fig, tab)
+        canvas.draw()
+        canvas.get_tk_widget().pack()
+        tk.Checkbutton(tab, text="Show timer values", variable=self._optimiser_show_counters, command=self._plot_optimisation).pack(fill='x')
+        self._optimiser.register_call_on_recalculate(self._plot_optimisation)
         # Create the Matplotlib toolbar
         toolbar = NavigationToolbar2Tk(canvas, tab)
         toolbar.update()
@@ -525,6 +675,45 @@ class GUI():
         github_link.bind("<Button-1>", lambda e: webbrowser.open_new_tab(github))
         ttk.Label(tab, text="MAIN STEPS:\n1. Upload the optimising sketch to the horn.\n2. Run or open a test.\n3. Upload the optimised settings to the horn.\n4. Upload the main bike horn sketch to put the horn back in power saving mode.").grid(padx=10, pady=10, row=2, column=0, sticky=tk.W)
     
+    def _plot_optimisation(self):
+        self._logging.info("Plotting optimisation: {}".format(self._optimiser_show_counters.get()))
+        self._ax_boost_best.clear()
+        self._ax_piezo_best.clear()
+        if self._optimiser_show_counters.get():
+            # Show counters instead of %
+            self._ax_boost_best.set_title("Optimal boost (timer 2) compare value")
+            self._ax_boost_best.set_xlabel("Piezo (timer 1) top")
+            self._ax_boost_best.set_ylabel("Timer 2 compare")
+            self._ax_piezo_best.set_title("Optimal piezo (timer 1) compare value")
+            self._ax_piezo_best.set_xlabel("Piezo (timer 1) top")
+            self._ax_piezo_best.set_ylabel("Timer 1 compare")
+
+            # TODO:
+            midi = self._optimiser.get_t1_tops()[:len(self._data_manager)]
+            best_boost = self._optimiser.get_best_t2_compare()
+            best_piezo = self._optimiser.get_best_t1_compare()
+        else:
+            # Show %
+            self._ax_boost_best.set_title("Optimal boost duty cycle")
+            self._ax_boost_best.set_xlabel("MIDI Note")
+            self._ax_boost_best.set_ylabel("Boost duty cycle [%]")
+            self._ax_piezo_best.set_title("Optimal piezo duty cycle")
+            self._ax_piezo_best.set_xlabel("MIDI Note")
+            self._ax_piezo_best.set_ylabel("Piezo duty cycle [%]")
+            midi = self._data_manager.get_midi_range()[:len(self._data_manager)]
+            best_boost = self._optimiser.get_best_boost()
+            best_piezo = self._optimiser.get_best_piezo()
+        
+        self._ax_boost_best.plot(midi, best_boost, label="Measured")
+        # TODO: ax_boost_best.plot(boost_x, boost_y, color="orange", label="Map")        
+        self._ax_boost_best.legend()
+
+        self._ax_piezo_best.plot(midi, best_piezo, label="Measured")
+        # TODO: ax_piezo_best.plot(piezo_x, piezo_y, color="orange", label="Map")
+        self._ax_piezo_best.legend()
+
+        self._optimiser_fig.canvas.draw_idle()
+
     def _plot_results_scroll(self, instruction=None, amount=None, units=None):
         max_index = len(self._data_manager.get_sound_data())-1
         if instruction == tk.SCROLL:
@@ -563,46 +752,36 @@ class GUI():
             # Not specified, if not on the last one, stay the same, otherwise go to latest
             if self._results_cur_value < len(sound_data)-2:
                 val = self._results_cur_value
-                print("Using current")
             else:
                 val = len(sound_data)-1
-                print("Going to front")
         
         self._results_cur_value = val
-        self._logging.info("Plotting data point {}".format(val))
-        # Update the title
-        settings = self._data_manager.get_settings()
-        try:
-            midi_note = int(settings["midi_note_inc"])*val + int(settings["midi_note_min"])
-            piezo_mesh, boost_mesh = np.meshgrid(
-                range(
-                    int(settings["piezo_duty_min"]), int(settings["piezo_duty_max"])+1, int(settings["piezo_duty_inc"])
-                ),
-                range(
-                    int(settings["boost_duty_min"]), int(settings["boost_duty_max"])+1, int(settings["boost_duty_inc"])
-                )
-            )
-        except (KeyError, ValueError):
-            self._logging.error("Error drawing results plot - cannot use settings given")
-            return
+        
+        # Getting data and plotting it
+        piezo_range = self._data_manager.get_piezo_range()
+        if piezo_range:
+            boost_range = self._data_manager.get_boost_range()
+            if boost_range:
+                piezo_mesh, boost_mesh = np.meshgrid(piezo_range, boost_range)
 
-        self._results_fig.suptitle("Performance for midi note {}".format(midi_note))
+                # Update the title
+                self._results_fig.suptitle("Performance for midi note {}".format(self._data_manager.get_midi_range()[val]))
 
-        # Process data and get the maximum and minimum
-        sound_data = np.array(self._data_manager.get_sound_data())
-        loudness = sound_data[val]
+                # Process data and get the maximum and minimum
+                sound_data = np.array(self._data_manager.get_sound_data())
+                loudness = sound_data[val]
 
-        # Display subplot 1
-        self._ax_loudness.cla()
-        self._ax_loudness.set_xlabel("Piezo Duty Cycle [%]")
-        self._ax_loudness.set_ylabel("Boost Duty Cycle [%]")
-        self._ax_loudness.set_zlabel("Loudness")
-        self._ax_loudness.plot_surface(piezo_mesh, boost_mesh, loudness, color="b")
-        self._ax_loudness.set_xlim3d(piezo_mesh[0,0], piezo_mesh[-1,-1])
-        self._ax_loudness.set_ylim3d(boost_mesh[0,0], boost_mesh[-1,-1])
+                # Display subplot 1
+                self._ax_loudness.cla()
+                self._ax_loudness.set_xlabel("Piezo Duty Cycle [%]")
+                self._ax_loudness.set_ylabel("Boost Duty Cycle [%]")
+                self._ax_loudness.set_zlabel("Loudness")
+                self._ax_loudness.plot_surface(piezo_mesh, boost_mesh, loudness, color="b")
+                self._ax_loudness.set_xlim3d(piezo_mesh[0,0], piezo_mesh[-1,-1])
+                self._ax_loudness.set_ylim3d(boost_mesh[0,0], boost_mesh[-1,-1])
 
-        # Update
-        self._results_fig.canvas.draw_idle()
+                # Update
+                self._results_fig.canvas.draw_idle()
 
     def _set_current_file_text(self, text):
         self._current_file_text.configure(state='normal')
@@ -717,7 +896,9 @@ if __name__ == "__main__":
     logging = Logging()
     data_manager = DataManager(logging)
     bike_horn = BikeHornInterface(logging, data_manager)
-    gui = GUI(logging, bike_horn, data_manager)
+    optimiser = Optimiser(logging, data_manager, bike_horn)
+    gui = GUI(logging, bike_horn, data_manager, optimiser)
+    optimiser.set_gui(gui)
     bike_horn.set_gui(gui)
     audio = AudioLevels(gui)
     bike_horn.set_audio(audio)
