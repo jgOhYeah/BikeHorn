@@ -22,6 +22,17 @@ const uint16_t WeWishYouAMerryChristmas[] PROGMEM = {
     0xf001 // End of tune. Restart from the beginning.
 };
 
+// Converted from 'auld_lang_syne_PNO_orig' by TunePlayer Musescore plugin V1.8.0
+const uint16_t auld_lang_syne_PNO_orig[] PROGMEM = {
+    0xe0dc, // Tempo change to 220 BPM
+    0x9a38,0x2c58,0x2c18,0x2c38,0x6c38,0x4c58,0x2c18,0x4c38,0x6c38,0x2c58,
+    0x2c18,0x6c38,0x9c38,0xbcb8,0xbc38,0x9c58,0x6c18,0x6c38,0x2c38,0x4c58,
+    0x2c18,0x4c38,0x6c38,0x2c58,0xba18,0xba38,0x9a38,0x2cb8,0xbc38,0x9c58,
+    0x6c18,0x6c38,0x2c38,0x4c58,0x2c18,0x4c38,0xbc38,0x9c58,0x6c18,0x6c38,
+    0x9c38,0xbcb8,0x2e38,0x9c58,0x6c18,0x6c38,0x2c38,0xc058,0xc038,0x6c1a,
+    0x2c58,0xba18,0xba38,0x9a38,0x2cb8,
+    0xf001 // End of tune. Restart from the beginning.
+};
 
 // Converted from 'ImperialMarchPICAXE' by TunePlayer Musescore plugin V1.6.1
 const uint16_t ImperialMarchPICAXE[] PROGMEM = {
@@ -88,5 +99,5 @@ const uint16_t BlueBikeHorn[] PROGMEM = {
     0xf001 // End of tune. Restart from the beginning.
 };
 
-const uint16_t *const tunes[] PROGMEM = {WeWishYouAMerryChristmas, rossini_william_tell, BlueBikeHorn, TakeOnMeIntroLoop, ImperialMarchPICAXE, Final_Countdown, Cantina, beep};
+const uint16_t *const tunes[] PROGMEM = {WeWishYouAMerryChristmas, auld_lang_syne_PNO_orig, rossini_william_tell, BlueBikeHorn, TakeOnMeIntroLoop, ImperialMarchPICAXE, Final_Countdown, Cantina, beep};
 const uint8_t tuneCount = sizeof(tunes) / sizeof(uint16_t);
