@@ -3,16 +3,15 @@
 import tkinter as tk                    
 from tkinter import ttk
 from tkinter import filedialog as fd
+from tkinter.constants import NSEW
 import tkinter.messagebox as tkmb
 import webbrowser
 
 # Graphs
-import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-from numpy.core.fromnumeric import var
+from numpy.lib.shape_base import _put_along_axis_dispatcher
 
 # Serial
 import serial.tools.list_ports
@@ -21,6 +20,9 @@ import serial
 
 # Sound
 import sounddevice as sd
+
+# Optimising
+import piecewise_regression
 
 # General
 import time
@@ -269,6 +271,13 @@ class BikeHornInterface():
                             return
 
                     sound_midi_data.append(sound_boost_data)
+                
+                # Let the horn cool off
+                self._logging.info("Stopping for a few seconds to let the horn cool off")
+                self._shut_up()
+                time.sleep(10)
+
+                # Save and make a backup copy of the data
                 sound_data.append(sound_midi_data)
                 data_manager.set_sound_data(sound_data)
                 data_manager.save_data(backup=True)
@@ -318,7 +327,7 @@ class BikeHornInterface():
                 self.abort_test()
                 return 0
             
-            time.sleep(0.1) # A short while to let things stabilise
+            time.sleep(0.2) # A short while to let things stabilise
             return self._audio.get_level()
         else:
             self._logging.error("Lost connection to horn - serial port closed unexpectedly")
@@ -376,6 +385,88 @@ class BikeHornInterface():
         if self._gui:
             self._gui.test_finished(success)
 
+class LinearFunction():
+    """Class for a linear function
+    """
+    def __init__(self, gradient, x0, y0):
+        self.m = gradient
+        self.c = y0-gradient*x0
+    
+    def apply(self, x):
+        return self.m * x + self.c
+
+    def __str__(self):
+        return "{:>6.2f}*x + {:>6.2f}".format(self.m, self.c)
+
+class PiecewiseLinear():
+    """Class for piecewise linear functions"""
+    def __init__(self, fit, n_breakpoints):
+        """Loads fit data in dictionary form from piecewise linear regression"""
+        self._functions = []
+        # Function to the left of the first breakpoint
+        self._functions.append((LinearFunction(self._get_est(fit, "alpha1"), 0, self._get_est(fit, "const")), 0))
+        for i in range(n_breakpoints):
+            gradient = self._get_est(fit, "alpha{}".format(i+2))
+            x0 = self._get_est(fit, "breakpoint{}".format(i+1))
+            y0 = self._functions[i][0].apply(x0)
+            function = LinearFunction(gradient, x0, y0)
+            self._functions.append((function, x0))
+
+    def apply(self, x: float) -> float:
+        """Applies the piecewise function to the given number
+
+        Args:
+            x (float): Input number
+
+        Returns:
+            float: f(x) (i.e. the result)
+        """
+        return self.function_for_given(x).apply(x)
+
+    def function_for_given(self, x:float) -> LinearFunction:
+        """Returns the LinearFunction that would be used for a given number
+
+        Args:
+            x (number): The given number
+
+        Returns:
+            LinearFunction: The function that would be used when evaluating
+        """
+        for i in range(len(self._functions)-1):
+            if x < self._functions[i+1][1]:
+                # Found the corresponding function
+                return self._functions[i][0]
+        
+        # Else clause
+        return self._functions[-1][0]
+
+    def _get_est(self, fit, key):
+        return fit["estimates"][key]["estimate"]
+
+    def __str__(self):
+        result = []
+        for i in range(len(self._functions)):
+            if i == len(self._functions) // 2:
+                # Draw 'f(x) = ' instead of spaces
+                result.append("f(x) = {")
+            else:
+                result.append("       {")
+            
+            result.append(str(self._functions[i][0]))
+            length = len(result)
+            if(i == 0):
+                # x < x0
+                result.append(", x < {:>6.2f}\n".format(self._functions[i+1][1]))
+            elif(i != len(self._functions)-1):
+                # x0 <= x < x1
+                result.append(", {:>6.2f} <= x < {:>6.2f}\n".format(self._functions[i][1], self._functions[i+1][1]))
+            else:
+                # x >= x0
+                result.append(", x >= {:>6.2f}".format(self._functions[i][1]))
+        return "".join(result)
+
+
+
 class Optimiser():
     def __init__(self, logging, data_manager:DataManager, bike_horn:BikeHornInterface, gui=None):
         self._data_manager = data_manager
@@ -411,10 +502,35 @@ class Optimiser():
                 self._best_piezo_duty[i] = piezo_range[piezo_index]
                 self._best_loudness[i] = sound_data[i, boost_index, piezo_index]
         
+        # Convert to piecewise functions
+        
+
         # Call on recalculate
         for i in self._call_on_recalculate:
             i()
     
+    def optimise(self):
+        """Processes the data to get linear functions (time consuming)
+        """
+        # TODO: Set breakpoints in gui
+        piezo_breakpoints = 2
+        boost_breakpoints = 4
+        # Try the piezo regression
+        self._piezo_fit = piecewise_regression.Fit(self._data_manager.get_midi_range, self._best_piezo_duty, n_breakpoints=piezo_breakpoints)
+        piezo_fit_results = self._piezo_fit.get_results()
+        if piezo_fit_results["converged"]:
+            # Piezo was successful. Now try the boost
+            self._boost_fit = piecewise_regression.Fit(self._data_manager.get_midi_range, self._best_piezo_duty, n_breakpoints=boost_breakpoints)
+            boost_fit_results = self._boost_fit.get_results()
+            if not boost_fit_results["converged"]:
+                self._logging.error("The boost results did not converge with {} breakpoints. Maybe try a different number?".format(boost_breakpoints))
+        else:
+            self._logging.error("The piezo results did not converge with {} breakpoints. Maybe try a different number?".format(piezo_breakpoints))
+
+    def generate_piecewise(self):
+        pass
+        # TODO
+
     def get_best_boost(self):
         return self._best_boost_duty
 
@@ -475,7 +591,7 @@ class GUI():
         view_results_tab = ttk.Frame(tab_control)
         tab_control.add(view_results_tab, text='View results')
         optimisation_tab = ttk.Frame(tab_control)
-        tab_control.add(optimisation_tab, text ='Optimisation')
+        tab_control.add(optimisation_tab, text ='Optimisation Settings')
         upload_settings_tab = ttk.Frame(tab_control)
         tab_control.add(upload_settings_tab, text ='View / Upload Optimisations')
         help_tab = ttk.Frame(tab_control)
@@ -483,13 +599,8 @@ class GUI():
         tab_control.pack(expand=True, fill ='both')
 
         # Message output
-        messages_frame = ttk.Frame(self._root)
         ttk.Label(self._root, text="Messages").pack(side=tk.LEFT, padx=10, pady=10)
-        self._text_messages = tk.Text(messages_frame, height=5, padx=5, pady=5)
-        self._text_messages.pack(side=tk.LEFT, expand=True, fill='x')
-        monitor_scroll_bar = tk.Scrollbar(messages_frame, orient='vertical', command=self._text_messages.yview)
-        monitor_scroll_bar.pack(side=tk.RIGHT, fill='y')
-        self._text_messages['yscrollcommand'] = monitor_scroll_bar.set
+        messages_frame, self._text_messages = self._draw_scrollable_text(self._root, 5)
         messages_frame.pack(expand=True, fill='x')
         
         # Fill up the tabs (after drawing the monitor so they can log to it)
@@ -498,6 +609,7 @@ class GUI():
         self._save_settings()
         self._draw_results_tab(view_results_tab)
         self._draw_optimisation_tab(optimisation_tab)
+        self._draw_upload_tab(upload_settings_tab)
         self._draw_help_tab(help_tab)
 
         self._root.protocol("WM_DELETE_WINDOW", self._close_window)
@@ -505,6 +617,26 @@ class GUI():
     def run(self):
         # Ready for interaction
         self._root.mainloop()
+
+    def _draw_scrollable_text(self, parent, height, disabled=True):
+        """Draws a frame containing 
+
+        Args:
+            parent ([type]): [description]
+            height ([type]): [description]
+
+        Returns:
+            tuple(frame, text): Frame and text widget. The frame needs to be drawn with pack or grid to show
+        """
+        frame = ttk.Frame(parent)
+        text = tk.Text(frame, height=height, padx=5, pady=5)
+        text.pack(side=tk.LEFT, expand=True, fill='x')
+        scroll_bar = tk.Scrollbar(frame, orient='vertical', command=text.yview)
+        scroll_bar.pack(side=tk.RIGHT, fill='y')
+        text['yscrollcommand'] = scroll_bar.set
+        if disabled:
+            text.configure(state='disabled')
+        return frame, text
 
     def _confirm_run_test(self):
         """Asks whether to run the test as any unsaved results and settings will be lost
@@ -537,8 +669,10 @@ class GUI():
         self._test_control_button['text'] = "Start Test"
         self._test_control_button['command'] = self._confirm_run_test
 
-        # Set the progress bar to 0 if note successful
-        if not success:
+        # Set the progress bar to 0 if note successful or make sure it is at the end if success
+        if success:
+            self.update_test_progress(1)
+        else:
             self.update_test_progress(0)
 
     def update_test_progress(self, value):
@@ -686,7 +820,7 @@ class GUI():
         ttk.Label(tab, text="Current file:").grid(row=0, column=0, sticky=tk.W, padx=10, pady=10)
         self._current_file_text = tk.Text(tab, width=70, height=2, padx=5, pady=5)
         self._current_file_text.grid(row=0, column=1, sticky=tk.NSEW, padx=10, pady=10)
-        self._set_current_file_text(self._data_manager.get_filename())
+        self._replace_text_contents(self._current_file_text, self._data_manager.get_filename())
         ttk.Button(tab, text="Open", command=self._select_open_file).grid(row=0, column=3, padx=10, pady=10, sticky=tk.E)
         ttk.Button(tab, text="Save as", command=self._select_save_file).grid(row=0, column=4, padx=10, pady=10, sticky=tk.E)
 
@@ -742,6 +876,22 @@ class GUI():
         github_link.bind("<Button-1>", lambda e: webbrowser.open_new_tab(github))
         ttk.Label(tab, text="MAIN STEPS:\n1. Upload the optimising sketch to the horn.\n2. Run or open a test.\n3. Upload the optimised settings to the horn.\n4. Upload the main bike horn sketch to put the horn back in power saving mode.").grid(padx=10, pady=10, row=2, column=0, sticky=tk.W)
     
+    def _draw_upload_tab(self, tab):
+        ttk.Label(tab, text="Optimal timer 1 (piezo) compare as a function of timer 1 top").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
+        frame, self._timer1_human_readable = self._draw_scrollable_text(tab, 5)
+        frame.grid(row=1, sticky=NSEW, padx=10, pady=(0, 10))
+        ttk.Label(tab, text="Optimal timer 2 (boost) compare as a function of timer 1 top").grid(row=2, column=0, padx=10, pady=10, sticky=tk.W)
+        frame, self._timer2_human_readable = self._draw_scrollable_text(tab, 5)
+        frame.grid(row=3, sticky=NSEW, padx=10, pady=(0, 10))
+        ttk.Label(tab, text="Raw settings that will be uploaded").grid(row=4, column=0, padx=10, pady=10, sticky=tk.NSEW)
+        frame, self._to_upload_text = self._draw_scrollable_text(tab, 7)
+        frame.grid(row=5, sticky=NSEW, padx=10, pady=(0, 10))
+        ttk.Button(tab, text="Upload to horn (WHEN IMPLEMENTED)").grid(row=6, column=0, padx=10, pady=10, sticky=tk.NSEW)
+
+    def _draw_optimised_formulas(self):
+        # TODO
+        pass
+
     def _plot_optimisation(self):
         self._ax_boost_best.clear()
         self._ax_piezo_best.clear()
@@ -849,18 +999,18 @@ class GUI():
                 # Update
                 self._results_fig.canvas.draw_idle()
 
-    def _set_current_file_text(self, text):
-        self._current_file_text.configure(state='normal')
-        self._current_file_text.delete('1.0', 'end')
-        self._current_file_text.insert('end', text)
-        self._current_file_text.configure(state='disabled')
+    def _replace_text_contents(self, widget, text):
+        widget.configure(state='normal')
+        widget.delete('1.0', 'end')
+        widget.insert('end', text)
+        widget.configure(state='disabled')
 
     def _select_save_file(self):
         self._data_manager.get_filename()
         filename = fd.asksaveasfilename(defaultextension="npz", initialfile=self._data_manager.get_filename())
         if type(filename) == str:
             self._logging.info("Filename to use is: '{}'".format(filename))
-            self._set_current_file_text(filename)
+            self._replace_text_contents(self._current_file_text, filename)
             self._data_manager.set_filename(filename)
             self._save_settings()
             self._data_manager.save_data()
@@ -873,7 +1023,7 @@ class GUI():
             filename = fd.askopenfilename(defaultextension="npz", initialfile=self._data_manager.get_filename())
             if type(filename) == str and filename != "":
                 self._data_manager.open(filename)
-                self._set_current_file_text(filename)
+                self._replace_text_contents(self._current_file_text, filename)
             else:
                 self._logging.info("Cancelled opening file")
         else:
