@@ -3,7 +3,6 @@
 import tkinter as tk                    
 from tkinter import ttk
 from tkinter import filedialog as fd
-from tkinter.constants import NSEW
 import tkinter.messagebox as tkmb
 import webbrowser
 
@@ -191,6 +190,9 @@ class BikeHornInterface():
     TIMER_2_PRESCALAR = 1
     TIMER_2_TOP = 255
     
+    EEPROM_TIMER1_PIECEWISE = 1 # // TODO: Work out bytes and addresses that don't interfere with EEPROM wear leveling 
+    EEPROM_TIMER2_PIECEWISE = 82 # // 81 bytes for up to 10 points
+    
 
     def __init__(self, logging, data_manager, audio=None, gui=None):
         self._serial_port = serial.Serial()
@@ -303,6 +305,7 @@ class BikeHornInterface():
     
     def midi_to_freq(self, midi):
         # Useful resource for midi note and frequencies: https://newt.phys.unsw.edu.au/jw/notes.html
+        assert midi >= 0 and midi <= 127, "Midi out of range 0-127. Was given {}".format(midi)
         return 2**((midi-69)/12) * 440
 
     def midi_to_counter_top(self, midi):
@@ -387,63 +390,90 @@ class BikeHornInterface():
 class LinearFunction():
     """Class for a linear function
     """
-    MAX_MULTIPLIER = 2**15-1
+    MAX_MULTIPLIER = 255
+    MAX_DENOMINATOR = 127
+    MAX_CONSTANT = 2**31-1
 
     def __init__(self, gradient, x0, y0):
         self.m = gradient
-        self.c = round(y0-gradient*x0)
+        self.c = int(round(y0-gradient*x0))
+        assert self.c > -(LinearFunction.MAX_CONSTANT - 1) and self.c < LinearFunction.MAX_CONSTANT, "Constant ({}) is the wrong size".format(self.c)
     
     def apply(self, x):
         return self.m * x + self.c
 
-    def to_list(self):
-        """Returns a list in the form multiplier, divisor, constant
+    def to_bytes(self):
+        """Returns bytes in the form multiplier, divisor, constant
         """
-        # TODO: Cope with timer 1 values instead of %
-        m_frac = self._multiplier_as_fraction()
-        return [m_frac.numerator, m_frac.denominator, self.c]
-    
-    def _multiplier_as_fraction(self) -> fractions.Fraction:
+        numerator, denominator = self._multiplier_as_fraction()
+        return numerator.to_bytes(1, "little", signed=False) + denominator.to_bytes(1, 'little', signed=True) + self.c.to_bytes(4, 'little', signed=True)
+
+    def _multiplier_as_fraction(self) -> tuple:
         """Converts the multiplier to a fraction where the numerator is at most MAX_MULTIPLIER
 
         Returns:
-            fractions.Fraction: The multiplier as a fraction
+            tuple: The multiplier in the form (numerator, denominator)
         """
-        m_fraction = fractions.Fraction(self.m)
-        max_denominator = max(math.floor(LinearFunction.MAX_MULTIPLIER / abs(self.m)), 1)
-        m_fraction = m_fraction.limit_denominator(max_denominator)
-        
-        return m_fraction
+        numerator = 0
+        denominator = 1
+        if self.m != 0:
+            m_fraction = fractions.Fraction(self.m)
+            max_denominator = min(max(math.floor(LinearFunction.MAX_MULTIPLIER / abs(self.m)), 1), LinearFunction.MAX_DENOMINATOR)
+            m_fraction = m_fraction.limit_denominator(max_denominator)
+            assert abs(m_fraction.numerator) <= LinearFunction.MAX_MULTIPLIER, "Numerator is too big"
+            assert abs(m_fraction.denominator) <= LinearFunction.MAX_MULTIPLIER, "Denominator is too big"
+            
+            numerator = int(m_fraction.numerator)
+            denominator = int(m_fraction.denominator)
+            if numerator < 0:
+                numerator = -numerator
+                denominator = -denominator
+
+        return numerator, denominator
 
 
     def __str__(self):
-        m_frac = self._multiplier_as_fraction()
-        return "{:>5.0f}*x/{:>5.0f} + {:>5.0f}".format(m_frac.numerator, m_frac.denominator, self.c)
+        numerator, denominator = self._multiplier_as_fraction()
+        return "{:>5.0f}*x/{:>5.0f} + {:>5.0f}".format(numerator, denominator, self.c)
 
 class PiecewiseLinear():
     """Class for piecewise linear functions"""
-    def __init__(self, fit, n_breakpoints):
-        """Loads fit data in dictionary form from piecewise linear regression"""
-        def get_est(key):
-            return fit["estimates"][key]["estimate"]
-        # Sort alphas and breakpoints by breakpoints in fit
-        fit_poi = []
-        for i in range(1, n_breakpoints+1):
-            beta = get_est("beta{}".format(i))
-            breakpoint = get_est("breakpoint{}".format(i))
-            fit_poi.append((beta, breakpoint))
-        fit_poi.sort(key=lambda x: x[1])
-
-        # Generating the functions
+    def __init__(self, fit=None, n_breakpoints=None, x_coords=None, y_coords=None):
+        """Loads fit data in dictionary form from piecewise linear regression
+        Use either fit and n_breakpoints or x_coords and y_coords, not both"""
         self._functions = []
-        # Function to the left of the first breakpoint
-        m = get_est("alpha1")
-        c = get_est("const")
-        self._functions.append((LinearFunction(m, 0, c), 0)) # The only alpha we can rely on (see https://github.com/chasmani/piecewise-regression/issues/3)
-        for i in range(n_breakpoints):
-            m += fit_poi[i][0] # Beta
-            c -= fit_poi[i][0]*fit_poi[i][1] # Beta * Breakpoint
-            self._functions.append((LinearFunction(m, 0, c), fit_poi[i][1]))
+        if fit is not None and n_breakpoints is not None:
+            # Generate from fit data dictionary
+            def get_est(key):
+                return fit["estimates"][key]["estimate"]
+            # Sort alphas and breakpoints by breakpoints in fit
+            fit_poi = []
+            for i in range(1, n_breakpoints+1):
+                beta = get_est("beta{}".format(i))
+                breakpoint = get_est("breakpoint{}".format(i))
+                fit_poi.append((beta, breakpoint))
+            fit_poi.sort(key=lambda x: x[1])
+
+            # Generating the functions
+            # Function to the left of the first breakpoint
+            m = get_est("alpha1")
+            c = get_est("const")
+            self._functions.append((LinearFunction(m, 0, c), 0)) # The only alpha we can rely on (see https://github.com/chasmani/piecewise-regression/issues/3)
+            for i in range(n_breakpoints):
+                m += fit_poi[i][0] # Beta
+                c -= fit_poi[i][0]*fit_poi[i][1] # Beta * Breakpoint
+                self._functions.append((LinearFunction(m, 0, c), fit_poi[i][1]))
+        else:
+            # Generate from coordinates of the breakpoints and ends
+            assert len(x_coords) == len(y_coords), "Mismatch in coordinate length"
+            for i in range(1, len(x_coords)):
+                m = (y_coords[i] - y_coords[i-1]) / (x_coords[i] - x_coords[i-1])
+                self._functions.append((LinearFunction(m, x_coords[i], y_coords[i]), x_coords[i]))
+            
+            # Sort in case the transform made it out of order
+            self._functions.sort(key=lambda x: x[1])
+            self._functions[0] = (self._functions[0][0], 0)
+
 
     def apply(self, x: float) -> float:
         """Applies the piecewise function to the given number
@@ -473,14 +503,17 @@ class PiecewiseLinear():
         # Else clause
         return self._functions[-1][0]
 
-    def to_list(self):
-        """Generates a list of numbers as would be stored in eeprom (not including the length)
-        All values will take up two bytes
+    def to_bytes(self):
+        """Generates a bytes object representing the piecewise function in the form
+        [uint8_t length,
+         uint16_t threshold1, uint8_t multiplier1, int8_t divisor1, init32_t constant1,
+         ...,
+         uint16_t thresholdn, uint8_t multipliern, int8_t divisorn, init32_t constantn]
         """
-        result = []
+        result = len(self).to_bytes(1, 'little', signed=False)
         for function, threshold in self._functions:
-            result.append(threshold)
-            result += function.to_list()
+            result += int(threshold).to_bytes(2, 'little', signed=False)
+            result += function.to_bytes()
 
         return result
     
@@ -500,6 +533,27 @@ class PiecewiseLinear():
         
         return x, y
 
+    def transform(self, x_transform, y_transform, minimum, maximum):
+        """Generates and returns a new piecewise function where the x and y coordinates have been
+        transformed in certain ways. Only mathematically equivalent if the transforms are
+        linear
+
+        Args:
+            x_transform (function): Function that returns a number and accepts the existing x and y coordinates that will return new x coordinates
+            y_transform (function): Function that returns a number and accepts the existing x and y coordinates that will return new y coordinates
+
+        Returns:
+            PiecewiseLinear: New piecewise linear function with the transform from this one
+        """
+        x, y = self.as_coordinates(minimum, maximum)
+        x_coords = []
+        y_coords = []
+        for i in range(len(x)):
+            x_coords.append(x_transform(x[i], y[i]))
+            y_coords.append(y_transform(x[i], y[i]))
+
+        return PiecewiseLinear(fit=None, n_breakpoints=None, x_coords=x_coords, y_coords=y_coords)
+
     def __len__(self):
         return len(self._functions)
 
@@ -515,13 +569,13 @@ class PiecewiseLinear():
             result.append(str(self._functions[i][0]))
             if(i == 0):
                 # x < x0
-                result.append(",            x <  {:>6.0f}\n".format(self._functions[i+1][1]))
+                result.append(",           x <  {:>6.0f}\n".format(self._functions[i+1][1]))
             elif(i != len(self._functions)-1):
                 # x0 <= x < x1
-                result.append(",  {:>6.0f} <= x <  {:>6.0f}\n".format(self._functions[i][1], self._functions[i+1][1]))
+                result.append(", {:>6.0f} <= x <  {:>6.0f}\n".format(self._functions[i][1], self._functions[i+1][1]))
             else:
                 # x >= x0
-                result.append(",            x >= {:>6.0f}".format(self._functions[i][1]))
+                result.append(",           x >= {:>6.0f}".format(self._functions[i][1]))
         return "".join(result)
 
 
@@ -629,7 +683,17 @@ class Optimiser():
 
     def get_boost_optimised(self):
         return self._boost_optimised
-
+    
+    def get_t1_optimised(self):
+        x_transform = lambda x, _: self._bike_horn.midi_to_counter_top(x)
+        y_transform = lambda x, y: self._bike_horn.duty_to_counter_compare(y, self._bike_horn.midi_to_counter_top(x))
+        return self._piezo_optimised.transform(x_transform, y_transform, 23, 127) # 23 is the lowest playable note
+    
+    def get_t2_optimised(self):
+        x_transform = lambda x, _: self._bike_horn.midi_to_counter_top(x)
+        y_transform = lambda x, y: self._bike_horn.duty_to_counter_compare(y, 0xFF)
+        return self._boost_optimised.transform(x_transform, y_transform, 23, 127)
+    
     def get_best_boost(self):
         return self._best_boost_duty
 
@@ -824,7 +888,7 @@ class GUI():
         """Sets the settings
         """
         settings = self._data_manager.get_settings()
-        self._logging.info("Restoring the settings: {}".format(settings))
+        self._logging.info("Restoring the settings")
         try:
             self._serial_port.set(settings["serial_port"])
             self._piezo_duty_min_text.set(settings["piezo_duty_min"])
@@ -1007,15 +1071,18 @@ class GUI():
     def _draw_upload_tab(self, tab):
         ttk.Label(tab, text="Optimal timer 1 (piezo) compare as a function of timer 1 top").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
         frame, self._timer1_human_readable = self._draw_scrollable_text(tab, 4)
-        frame.grid(row=1, sticky=NSEW, padx=10, pady=(0, 10))
+        frame.grid(row=1, sticky=tk.NSEW, padx=10, pady=(0, 10))
         ttk.Label(tab, text="Optimal timer 2 (boost) compare as a function of timer 1 top").grid(row=2, column=0, padx=10, pady=10, sticky=tk.W)
         frame, self._timer2_human_readable = self._draw_scrollable_text(tab, 4)
-        frame.grid(row=3, sticky=NSEW, padx=10, pady=(0, 10))
-        ttk.Label(tab, text="Raw settings that will be uploaded").grid(row=4, column=0, padx=10, pady=10, sticky=tk.NSEW)
+        frame.grid(row=3, sticky=tk.NSEW, padx=10, pady=(0, 10))
+        ttk.Label(tab, text="Compiled settings that will be uploaded").grid(row=4, column=0, padx=10, pady=10, sticky=tk.NSEW)
         frame, self._to_upload_text = self._draw_scrollable_text(tab, 5)
-        frame.grid(row=5, sticky=NSEW, padx=10, pady=(0, 10))
-        ttk.Button(tab, text="Upload to horn (WHEN IMPLEMENTED)").grid(row=6, column=0, padx=10, pady=10, sticky=tk.NSEW)
+        frame.grid(row=5, sticky=tk.NSEW, padx=10, pady=(0, 10))
+        self._upload_button = ttk.Button(tab, text="Upload to horn (WHEN IMPLEMENTED)")
+        self._upload_button.grid(row=6, column=0, padx=10, pady=10, sticky=tk.NSEW)
+        self._upload_button["state"] = tk.DISABLED
 
+        self._draw_optimised_formulas()
         self._optimiser.register_call_on_recalculate(self._draw_optimised_formulas)
         self._optimiser.register_call_on_optimise_sucess(self._draw_optimised_formulas)
         tab.columnconfigure(0, weight=1)
@@ -1026,14 +1093,21 @@ class GUI():
         """
         if self._optimiser.is_optimisation_valid():
             # Sucess, draw the formulas
-            timer1_contents = str(self._optimiser.get_piezo_optimised())
-            timer2_contents = str(self._optimiser.get_boost_optimised())
+            timer1_contents = str(self._optimiser.get_t1_optimised())
+            timer2_contents = str(self._optimiser.get_t2_optimised())
             self._replace_text_contents(self._timer1_human_readable, timer1_contents)
             self._replace_text_contents(self._timer2_human_readable, timer2_contents)
+
+            compiled_contents = "Starting from EEPROM address {}:\n{}\n\nStarting from EEPROM address {}:\n{}".format(
+                BikeHornInterface.EEPROM_TIMER1_PIECEWISE, self._optimiser.get_t1_optimised().to_bytes(),
+                BikeHornInterface.EEPROM_TIMER2_PIECEWISE, self._optimiser.get_t2_optimised().to_bytes()
+            )
+            self._replace_text_contents(self._to_upload_text, compiled_contents)
         else:
             # No success
             self._replace_text_contents(self._timer1_human_readable, "Click 'Optimise' on the 'Optimisation Settings' tab to generate this")
             self._replace_text_contents(self._timer2_human_readable, "Click 'Optimise' on the 'Optimisation Settings' tab to generate this")
+            self._replace_text_contents(self._to_upload_text, "Click 'Optimise' on the 'Optimisation Settings' tab to generate this")
 
     def _start_optimise(self):
         """Starts the optimising process"""
@@ -1056,6 +1130,9 @@ class GUI():
     def _plot_optimisation(self):
         self._ax_boost_best.clear()
         self._ax_piezo_best.clear()
+        boost_x, boost_y = ([], [])
+        piezo_x, piezo_y = ([], [])
+
         if self._optimiser_show_counters.get():
             # Show counters instead of %
             self._ax_boost_best.set_title("Optimal boost (timer 2) compare value")
@@ -1065,10 +1142,13 @@ class GUI():
             self._ax_piezo_best.set_xlabel("Piezo (timer 1) top")
             self._ax_piezo_best.set_ylabel("Timer 1 compare")
 
-            # TODO:
             midi = self._optimiser.get_t1_tops()[:len(self._data_manager)]
             best_boost = self._optimiser.get_best_t2_compare()
             best_piezo = self._optimiser.get_best_t1_compare()
+
+            if self._optimiser.is_optimisation_valid():
+                boost_x, boost_y = self._optimiser.get_t1_optimised().as_coordinates(midi[0], midi[-1])
+                piezo_x, piezo_y = self._optimiser.get_t2_optimised().as_coordinates(midi[0], midi[-1])
         else:
             # Show %
             self._ax_boost_best.set_title("Optimal boost duty cycle")
@@ -1080,15 +1160,17 @@ class GUI():
             midi = self._data_manager.get_midi_range()[:len(self._data_manager)]
             best_boost = self._optimiser.get_best_boost()
             best_piezo = self._optimiser.get_best_piezo()
+
+            if self._optimiser.is_optimisation_valid():
+                boost_x, boost_y = self._optimiser.get_boost_optimised().as_coordinates(midi[0], midi[-1])
+                piezo_x, piezo_y = self._optimiser.get_piezo_optimised().as_coordinates(midi[0], midi[-1])
         
         self._ax_boost_best.plot(midi, best_boost, label="Measured")
         self._ax_piezo_best.plot(midi, best_piezo, label="Measured")
 
         if self._optimiser.is_optimisation_valid():
-            boost_x, boost_y = self._optimiser.get_boost_optimised().as_coordinates(midi[0], midi[-1])
-            piezo_x, piezo_y = self._optimiser.get_piezo_optimised().as_coordinates(midi[0], midi[-1])
-            self._ax_boost_best.plot(boost_x, boost_y, color="orange", label="Optimised")        
-            self._ax_piezo_best.plot(piezo_x, piezo_y, color="orange", label="Optimised")
+            self._ax_boost_best.plot(boost_x, boost_y, label="Optimised")
+            self._ax_piezo_best.plot(piezo_x, piezo_y, label="Optimised")
 
         self._ax_boost_best.legend()
         self._ax_piezo_best.legend()
