@@ -11,7 +11,6 @@ import webbrowser
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-from numpy.lib.shape_base import _put_along_axis_dispatcher
 
 # Serial
 import serial.tools.list_ports
@@ -23,15 +22,15 @@ import sounddevice as sd
 
 # Optimising
 import piecewise_regression
+import fractions
+import math
 
 # General
 import time
 import numpy as np
 import threading
-from typing import Iterable
+from typing import Iterable, Tuple
 import datetime
-
-import faulthandler; faulthandler.enable() # TODO: Remove when segmentation fault is found
 
 # TODO: Load / save a default settings file automatically (not necessary, but might be convenient)
 
@@ -388,29 +387,63 @@ class BikeHornInterface():
 class LinearFunction():
     """Class for a linear function
     """
+    MAX_MULTIPLIER = 2**15-1
+
     def __init__(self, gradient, x0, y0):
         self.m = gradient
-        self.c = y0-gradient*x0
+        self.c = round(y0-gradient*x0)
     
     def apply(self, x):
         return self.m * x + self.c
 
+    def to_list(self):
+        """Returns a list in the form multiplier, divisor, constant
+        """
+        # TODO: Cope with timer 1 values instead of %
+        m_frac = self._multiplier_as_fraction()
+        return [m_frac.numerator, m_frac.denominator, self.c]
+    
+    def _multiplier_as_fraction(self) -> fractions.Fraction:
+        """Converts the multiplier to a fraction where the numerator is at most MAX_MULTIPLIER
+
+        Returns:
+            fractions.Fraction: The multiplier as a fraction
+        """
+        m_fraction = fractions.Fraction(self.m)
+        max_denominator = max(math.floor(LinearFunction.MAX_MULTIPLIER / abs(self.m)), 1)
+        m_fraction = m_fraction.limit_denominator(max_denominator)
+        
+        return m_fraction
+
+
     def __str__(self):
-        return "{:>6.2f}*x + {:>6.2f}".format(self.m, self.c)
+        m_frac = self._multiplier_as_fraction()
+        return "{:>5.0f}*x/{:>5.0f} + {:>5.0f}".format(m_frac.numerator, m_frac.denominator, self.c)
 
 class PiecewiseLinear():
     """Class for piecewise linear functions"""
     def __init__(self, fit, n_breakpoints):
         """Loads fit data in dictionary form from piecewise linear regression"""
+        def get_est(key):
+            return fit["estimates"][key]["estimate"]
+        # Sort alphas and breakpoints by breakpoints in fit
+        fit_poi = []
+        for i in range(1, n_breakpoints+1):
+            beta = get_est("beta{}".format(i))
+            breakpoint = get_est("breakpoint{}".format(i))
+            fit_poi.append((beta, breakpoint))
+        fit_poi.sort(key=lambda x: x[1])
+
+        # Generating the functions
         self._functions = []
         # Function to the left of the first breakpoint
-        self._functions.append((LinearFunction(self._get_est(fit, "alpha1"), 0, self._get_est(fit, "const")), 0))
+        m = get_est("alpha1")
+        c = get_est("const")
+        self._functions.append((LinearFunction(m, 0, c), 0)) # The only alpha we can rely on (see https://github.com/chasmani/piecewise-regression/issues/3)
         for i in range(n_breakpoints):
-            gradient = self._get_est(fit, "alpha{}".format(i+2))
-            x0 = self._get_est(fit, "breakpoint{}".format(i+1))
-            y0 = self._functions[i][0].apply(x0)
-            function = LinearFunction(gradient, x0, y0)
-            self._functions.append((function, x0))
+            m += fit_poi[i][0] # Beta
+            c -= fit_poi[i][0]*fit_poi[i][1] # Beta * Breakpoint
+            self._functions.append((LinearFunction(m, 0, c), fit_poi[i][1]))
 
     def apply(self, x: float) -> float:
         """Applies the piecewise function to the given number
@@ -440,31 +473,56 @@ class PiecewiseLinear():
         # Else clause
         return self._functions[-1][0]
 
-    def _get_est(self, fit, key):
-        return fit["estimates"][key]["estimate"]
+    def to_list(self):
+        """Generates a list of numbers as would be stored in eeprom (not including the length)
+        All values will take up two bytes
+        """
+        result = []
+        for function, threshold in self._functions:
+            result.append(threshold)
+            result += function.to_list()
+
+        return result
+    
+    def as_coordinates(self, minimum, maximum) -> Tuple:
+        """
+        Generates a tuple containing the x and y coordinates of each breakpoint + 1 each end that can be used to plot a graph
+        """
+        x = [minimum]
+        y = [self.apply(minimum)]
+        for _, threshold in self._functions:
+            if threshold > minimum and threshold < maximum:
+                x.append(threshold)
+                y.append(self.apply(threshold))
+        
+        x.append(maximum)
+        y.append(self.apply(maximum))
+        
+        return x, y
+
+    def __len__(self):
+        return len(self._functions)
 
     def __str__(self):
         result = []
         for i in range(len(self._functions)):
-            if i == len(self._functions) // 2:
+            if i == len(self._functions) // 2 - 1:
                 # Draw 'f(x) = ' instead of spaces
                 result.append("f(x) = {")
             else:
                 result.append("       {")
             
             result.append(str(self._functions[i][0]))
-            length = len(result)
             if(i == 0):
                 # x < x0
-                result.append(", x < {:>6.2f}\n".format(self._functions[i+1][1]))
+                result.append(",            x <  {:>6.0f}\n".format(self._functions[i+1][1]))
             elif(i != len(self._functions)-1):
                 # x0 <= x < x1
-                result.append(", {:>6.2f} <= x < {:>6.2f}\n".format(self._functions[i][1], self._functions[i+1][1]))
+                result.append(",  {:>6.0f} <= x <  {:>6.0f}\n".format(self._functions[i][1], self._functions[i+1][1]))
             else:
                 # x >= x0
-                result.append(", x >= {:>6.2f}".format(self._functions[i][1]))
+                result.append(",            x >= {:>6.0f}".format(self._functions[i][1]))
         return "".join(result)
-
 
 
 class Optimiser():
@@ -474,10 +532,15 @@ class Optimiser():
         self._bike_horn = bike_horn
         self._gui = gui
         self._call_on_recalculate = []
+        self._call_on_optimise_success = []
         self._data_manager.register_call_on_update(self._recalculate, True, False)
         self._best_boost_duty = []
         self._best_piezo_duty = []
         self._best_loudness = np.empty(1)
+        self._piezo_optimised = None
+        self._boost_optimised = None
+        self._boost_optimisation_valid = -1
+        self._piezo_optimisation_valid = -1
     
     def set_gui(self, gui=None):
         self._gui = gui
@@ -485,7 +548,13 @@ class Optimiser():
     def register_call_on_recalculate(self, method):
         self._call_on_recalculate.append(method)
     
+    def register_call_on_optimise_sucess(self, method):
+        self._call_on_optimise_success.append(method)
+    
     def _recalculate(self):
+        self._boost_optimisation_valid = -1
+        self._piezo_optimisation_valid = -1
+
         sound_data = np.array(self._data_manager.get_sound_data())
 
         # Calculate and display the best coordinates
@@ -501,35 +570,65 @@ class Optimiser():
                 self._best_boost_duty[i] = boost_range[boost_index]
                 self._best_piezo_duty[i] = piezo_range[piezo_index]
                 self._best_loudness[i] = sound_data[i, boost_index, piezo_index]
-        
-        # Convert to piecewise functions
-        
 
         # Call on recalculate
         for i in self._call_on_recalculate:
             i()
     
-    def optimise(self):
+    def optimise(self, piezo_breakpoints, boost_breakpoints):
         """Processes the data to get linear functions (time consuming)
         """
-        # TODO: Set breakpoints in gui
-        piezo_breakpoints = 2
-        boost_breakpoints = 4
-        # Try the piezo regression
-        self._piezo_fit = piecewise_regression.Fit(self._data_manager.get_midi_range, self._best_piezo_duty, n_breakpoints=piezo_breakpoints)
-        piezo_fit_results = self._piezo_fit.get_results()
-        if piezo_fit_results["converged"]:
-            # Piezo was successful. Now try the boost
-            self._boost_fit = piecewise_regression.Fit(self._data_manager.get_midi_range, self._best_piezo_duty, n_breakpoints=boost_breakpoints)
-            boost_fit_results = self._boost_fit.get_results()
-            if not boost_fit_results["converged"]:
-                self._logging.error("The boost results did not converge with {} breakpoints. Maybe try a different number?".format(boost_breakpoints))
-        else:
-            self._logging.error("The piezo results did not converge with {} breakpoints. Maybe try a different number?".format(piezo_breakpoints))
+        # Test if there is enough data
+        if len(self._best_piezo_duty) >= 3 and len(self._best_boost_duty) >= 3:
+            midi_notes = list(self._data_manager.get_midi_range())
 
-    def generate_piecewise(self):
-        pass
-        # TODO
+            # Try the piezo regression if needed
+            if self._piezo_optimisation_valid != piezo_breakpoints:
+                self._logging.info("Fitting piezo data with {} breakpoints".format(piezo_breakpoints))
+                piezo_fit = piecewise_regression.Fit(midi_notes, self._best_piezo_duty, n_breakpoints=piezo_breakpoints)
+                piezo_fit_results = piezo_fit.get_results()
+                if piezo_fit_results["converged"]:
+                    # Piezo was successful.
+                    self._piezo_optimised = PiecewiseLinear(piezo_fit_results, piezo_breakpoints)
+                    self._piezo_optimisation_valid = piezo_breakpoints
+                else:
+                    self._piezo_optimisation_valid = -1
+                    self._logging.error("The piezo results did not converge with {} breakpoints. Maybe try a different number?".format(piezo_breakpoints))
+                    return
+            else:
+                self._logging.info("Have already optimised the piezo results, so no point doing it again")
+
+            # Try the boost regression if needed
+            if self._boost_optimisation_valid != boost_breakpoints:
+                self._logging.info("Fitting boost data with {} breakpoints".format(boost_breakpoints))
+                boost_fit = piecewise_regression.Fit(midi_notes, self._best_boost_duty, n_breakpoints=boost_breakpoints)
+                boost_fit_results = boost_fit.get_results()
+                if boost_fit_results["converged"]:
+                    # Generate piecewise functions
+                    self._boost_optimised = PiecewiseLinear(boost_fit_results, boost_breakpoints)
+                    self._boost_optimisation_valid = boost_breakpoints
+                else:
+                    self._boost_optimisation_valid = -1
+                    self._logging.error("The boost results did not converge with {} breakpoints. Maybe try a different number?".format(boost_breakpoints))
+                    return
+            else:
+                self._logging.info("Have already optimised the boost results, so no point doing it again")
+        else:
+            self._logging.error("Not enough data points to optimise (or no data loaded)")
+            self._piezo_optimisation_valid = -1
+            self._boost_optimisation_valid = -1
+            return
+        
+        # Success. Call everything that needs to know
+        self._logging.info("Finished optimising successfully")
+        for i in self._call_on_optimise_success:
+            i()
+    
+    def get_piezo_optimised(self):
+        return self._piezo_optimised
+
+    def get_boost_optimised(self):
+        return self._boost_optimised
 
     def get_best_boost(self):
         return self._best_boost_duty
@@ -559,7 +658,13 @@ class Optimiser():
         midi_range = self._data_manager.get_midi_range()
         return [self._bike_horn.midi_to_counter_top(i) for i in midi_range]
 
+    def is_optimisation_valid(self) -> bool:
+        """Returns true if the current optimisation has been done and matches the latest data
 
+        Returns:
+            bool: Whether the current optimisation data can be trusted
+        """
+        return self._boost_optimisation_valid != -1 and self._piezo_optimisation_valid != -1
 
 class GUI():
     def __init__(self, logging, bike_horn:BikeHornInterface, data_manager:DataManager, optimiser:Optimiser):
@@ -618,7 +723,7 @@ class GUI():
         # Ready for interaction
         self._root.mainloop()
 
-    def _draw_scrollable_text(self, parent, height, disabled=True):
+    def _draw_scrollable_text(self, parent, height=None, disabled=True):
         """Draws a frame containing 
 
         Args:
@@ -629,7 +734,10 @@ class GUI():
             tuple(frame, text): Frame and text widget. The frame needs to be drawn with pack or grid to show
         """
         frame = ttk.Frame(parent)
-        text = tk.Text(frame, height=height, padx=5, pady=5)
+        if height is not None:
+            text = tk.Text(frame, height=height, padx=5, pady=5)
+        else:
+            text = tk.Text(frame, padx=5, pady=5)
         text.pack(side=tk.LEFT, expand=True, fill='x')
         scroll_bar = tk.Scrollbar(frame, orient='vertical', command=text.yview)
         scroll_bar.pack(side=tk.RIGHT, fill='y')
@@ -816,14 +924,18 @@ class GUI():
         self._test_progress = ttk.Progressbar(tab, orient=tk.HORIZONTAL, mode='determinate', length=800)
         self._test_progress.grid(column=0, row=7, columnspan=4, sticky=tk.NSEW, padx=10, pady=10)
 
+        tab.columnconfigure(tuple(range(4)), weight=1)
+
     def _draw_save_load_tab(self, tab):
         ttk.Label(tab, text="Current file:").grid(row=0, column=0, sticky=tk.W, padx=10, pady=10)
-        self._current_file_text = tk.Text(tab, width=70, height=2, padx=5, pady=5)
+        self._current_file_text = tk.Text(tab, height=2, padx=5, pady=5)
         self._current_file_text.grid(row=0, column=1, sticky=tk.NSEW, padx=10, pady=10)
         self._replace_text_contents(self._current_file_text, self._data_manager.get_filename())
         ttk.Button(tab, text="Open", command=self._select_open_file).grid(row=0, column=3, padx=10, pady=10, sticky=tk.E)
         ttk.Button(tab, text="Save as", command=self._select_save_file).grid(row=0, column=4, padx=10, pady=10, sticky=tk.E)
 
+        # tab.columnconfigure((0, 2 ,3), weight=0)
+        tab.columnconfigure(1, weight=2)
         # TODO: Show metadata and settings - possibly in a text box
 
     def _draw_results_tab(self, tab):
@@ -847,10 +959,14 @@ class GUI():
         # Create the Matplotlib toolbar
         toolbar = NavigationToolbar2Tk(canvas, tab)
         toolbar.update()
-        canvas.get_tk_widget().pack()
     
     def _draw_optimisation_tab(self, tab):
+        # GUI Variables
         self._optimiser_show_counters = tk.IntVar()
+        self._optimiser_piezo_breakpoints_text = tk.StringVar(value=4)
+        self._optimiser_boost_breakpoints_text = tk.StringVar(value=3)
+
+        # Graphs
         self._optimiser_fig = Figure()
         self._optimiser_fig.suptitle("Parameters for best performance of each note")
         self._ax_boost_best = self._optimiser_fig.add_subplot(2, 1, 1)
@@ -860,12 +976,24 @@ class GUI():
         canvas = FigureCanvasTkAgg(self._optimiser_fig, tab)
         canvas.draw()
         canvas.get_tk_widget().pack()
-        tk.Checkbutton(tab, text="Show timer values", variable=self._optimiser_show_counters, command=self._plot_optimisation).pack(fill='x')
-        self._optimiser.register_call_on_recalculate(self._plot_optimisation)
+
+        # Settings down the bottom
+        settings_frame = tk.Frame(tab)
+        tk.Checkbutton(settings_frame, text="Show timer values", variable=self._optimiser_show_counters, command=self._plot_optimisation).grid(row=0, column=0, sticky=tk.W, padx=10, pady=10)
+        tk.Label(settings_frame, text="Boost breakpoints:").grid(row=0, column=1, sticky=tk.E, padx=10, pady=10)
+        ttk.Spinbox(settings_frame,  from_=1, to=10, textvariable=self._optimiser_boost_breakpoints_text, width=10).grid(row=0, column=2, sticky=tk.W, padx=10, pady=10)
+        tk.Label(settings_frame, text="Piezo breakpoints:").grid(row=0, column=3, sticky=tk.E, padx=10, pady=10)
+        ttk.Spinbox(settings_frame,  from_=1, to=10, textvariable=self._optimiser_piezo_breakpoints_text, width=10).grid(row=0, column=4, sticky=tk.W, padx=10, pady=10)
+        self._optimise_button = tk.Button(settings_frame, text="Optimise", command=self._start_optimise)
+        self._optimise_button.grid(row=0, column=5, sticky=tk.E, padx=10, pady=10)
+        settings_frame.columnconfigure(tuple(range(6)), weight=1)
+        settings_frame.pack(expand=True, fill='x')
+
         # Create the Matplotlib toolbar
         toolbar = NavigationToolbar2Tk(canvas, tab)
         toolbar.update()
-        canvas.get_tk_widget().pack()
+        self._optimiser.register_call_on_recalculate(self._plot_optimisation)
+        self._optimiser.register_call_on_optimise_sucess(self._plot_optimisation)
 
     def _draw_help_tab(self, tab):
         ttk.Label(tab, text="Bike Horn Optimiser version {}\nBy Jotham Gates\nThis is still a work in progress. For more info, go to:".format(version)).grid(row=0, column=0, padx=10, pady=(10, 0), sticky=tk.W)
@@ -878,19 +1006,52 @@ class GUI():
     
     def _draw_upload_tab(self, tab):
         ttk.Label(tab, text="Optimal timer 1 (piezo) compare as a function of timer 1 top").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
-        frame, self._timer1_human_readable = self._draw_scrollable_text(tab, 5)
+        frame, self._timer1_human_readable = self._draw_scrollable_text(tab, 4)
         frame.grid(row=1, sticky=NSEW, padx=10, pady=(0, 10))
         ttk.Label(tab, text="Optimal timer 2 (boost) compare as a function of timer 1 top").grid(row=2, column=0, padx=10, pady=10, sticky=tk.W)
-        frame, self._timer2_human_readable = self._draw_scrollable_text(tab, 5)
+        frame, self._timer2_human_readable = self._draw_scrollable_text(tab, 4)
         frame.grid(row=3, sticky=NSEW, padx=10, pady=(0, 10))
         ttk.Label(tab, text="Raw settings that will be uploaded").grid(row=4, column=0, padx=10, pady=10, sticky=tk.NSEW)
-        frame, self._to_upload_text = self._draw_scrollable_text(tab, 7)
+        frame, self._to_upload_text = self._draw_scrollable_text(tab, 5)
         frame.grid(row=5, sticky=NSEW, padx=10, pady=(0, 10))
         ttk.Button(tab, text="Upload to horn (WHEN IMPLEMENTED)").grid(row=6, column=0, padx=10, pady=10, sticky=tk.NSEW)
 
+        self._optimiser.register_call_on_recalculate(self._draw_optimised_formulas)
+        self._optimiser.register_call_on_optimise_sucess(self._draw_optimised_formulas)
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure((1, 3, 5), weight=1)
+
     def _draw_optimised_formulas(self):
-        # TODO
-        pass
+        """Fills the text boxes with formulas
+        """
+        if self._optimiser.is_optimisation_valid():
+            # Sucess, draw the formulas
+            timer1_contents = str(self._optimiser.get_piezo_optimised())
+            timer2_contents = str(self._optimiser.get_boost_optimised())
+            self._replace_text_contents(self._timer1_human_readable, timer1_contents)
+            self._replace_text_contents(self._timer2_human_readable, timer2_contents)
+        else:
+            # No success
+            self._replace_text_contents(self._timer1_human_readable, "Click 'Optimise' on the 'Optimisation Settings' tab to generate this")
+            self._replace_text_contents(self._timer2_human_readable, "Click 'Optimise' on the 'Optimisation Settings' tab to generate this")
+
+    def _start_optimise(self):
+        """Starts the optimising process"""
+        def run_optimise(piezo_breakpoints, boost_breakpoints):
+            """Runs the optimising process and controls the button"""
+            self._optimise_button["state"] = tk.DISABLED
+            self._optimiser.optimise(piezo_breakpoints, boost_breakpoints)
+            self._optimise_button["state"] = tk.NORMAL
+        try:
+            piezo_breakpoints = int(self._optimiser_piezo_breakpoints_text.get())
+            boost_breakpoints = int(self._optimiser_boost_breakpoints_text.get())
+        except ValueError:
+            self._logging.error("Error interpreting optimisation parameters as integers")
+        else:
+            self._logging.info("Starting optimising process. This may take a few seconds")
+            test_thread = threading.Thread(target=run_optimise, args=(piezo_breakpoints, boost_breakpoints), daemon=True)
+            test_thread.start()
+
 
     def _plot_optimisation(self):
         self._ax_boost_best.clear()
@@ -921,11 +1082,15 @@ class GUI():
             best_piezo = self._optimiser.get_best_piezo()
         
         self._ax_boost_best.plot(midi, best_boost, label="Measured")
-        # TODO: ax_boost_best.plot(boost_x, boost_y, color="orange", label="Map")        
-        self._ax_boost_best.legend()
-
         self._ax_piezo_best.plot(midi, best_piezo, label="Measured")
-        # TODO: ax_piezo_best.plot(piezo_x, piezo_y, color="orange", label="Map")
+
+        if self._optimiser.is_optimisation_valid():
+            boost_x, boost_y = self._optimiser.get_boost_optimised().as_coordinates(midi[0], midi[-1])
+            piezo_x, piezo_y = self._optimiser.get_piezo_optimised().as_coordinates(midi[0], midi[-1])
+            self._ax_boost_best.plot(boost_x, boost_y, color="orange", label="Optimised")        
+            self._ax_piezo_best.plot(piezo_x, piezo_y, color="orange", label="Optimised")
+
+        self._ax_boost_best.legend()
         self._ax_piezo_best.legend()
 
         self._optimiser_fig.canvas.draw_idle()
