@@ -10,6 +10,8 @@ import webbrowser
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.patches import Patch
+from matplotlib.lines import Line2D
 
 # Serial
 import serial.tools.list_ports
@@ -32,8 +34,11 @@ from typing import Iterable, Tuple
 import datetime
 
 # TODO: Load / save a default settings file automatically (not necessary, but might be convenient)
+# TODO: Guard against negative numbers in timer settings
+# TODO: Standard deviation / different from those around a data point as a measure of uncertainty when fitting to avoid noise / didgy data
 
-version = "0.0.1a"
+name = "Bike Horn Optimiser Tool"
+version = "0.0.2"
 
 class DataManager():
     """Class to handle all data and the loading and saving of it
@@ -684,6 +689,10 @@ class Optimiser():
     def get_boost_optimised(self):
         return self._boost_optimised
     
+    def chosen_coords(self, index):
+        """Returns piezo, boost and loudness coordinates for a given index in the data"""
+        return self._best_piezo_duty[index], self._best_boost_duty[index], self._best_loudness[index]
+
     def get_t1_optimised(self):
         x_transform = lambda x, _: self._bike_horn.midi_to_counter_top(x)
         y_transform = lambda x, y: self._bike_horn.duty_to_counter_compare(y, self._bike_horn.midi_to_counter_top(x))
@@ -747,8 +756,8 @@ class GUI():
         """Runs the main loop
         """
         # GUI Setting up
-        self._root = tk.Tk()
-        self._root.title("Bike Horn Optimiser Tool")
+        self._root = tk.Tk(className=name)
+        self._root.title(name)
         self._root.tk.call('wm', 'iconphoto', self._root._w, tk.PhotoImage(file='icon.png'))
 
         # Draw the tabbed layout
@@ -925,70 +934,83 @@ class GUI():
 
     def _draw_run_test_tab(self, tab):
         # Serial port
-        ports = self._bike_horn.get_serial_ports()
+        def update_serial_ports():
+            ports = self._bike_horn.get_serial_ports()
+            self._logging.info("Serial ports found: {}".format(ports))
+            if len(ports) == 0:
+                ports.append("No serial ports found")
+                self._test_control_button["state"] = tk.DISABLED
+            else:
+                self._test_control_button["state"] = tk.NORMAL
+            self._serial_port_dropdown.set_menu(*ports)
+
         self._serial_port = tk.StringVar(self._root)
-        ttk.Label(tab, text="Serial port:").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
-        self._logging.info("Serial ports found: {}".format(ports))
-        default = ports[0] if len(ports) else "No serial ports found"
-        self._serial_port_dropdown = ttk.OptionMenu(tab, self._serial_port, default, *ports)
-        self._serial_port_dropdown.grid(column=1, row=0, padx=10, pady=10, sticky=tk.EW, columnspan=3)
-        # TODO: Refresh button
+        audio_serial_frame = tk.Frame(tab)
+        ttk.Label(audio_serial_frame, text="Serial port:").grid(row=0, column=0, padx=10, pady=10, sticky=tk.E)
+        self._serial_port_dropdown = ttk.OptionMenu(audio_serial_frame, self._serial_port)
+        self._serial_port_dropdown.grid(column=1, row=0, padx=10, pady=10, sticky=tk.EW)
+        tk.Button(audio_serial_frame, text="Refresh", command=update_serial_ports).grid(row=0, column=2, padx=10, pady=10)
 
         # Sound device
-        ttk.Label(tab, text="Audio level (preview):").grid(row=1, column=0, padx=10, pady=10, sticky=tk.W)
-        self._sound_progress = ttk.Progressbar(tab, orient=tk.HORIZONTAL, mode='determinate')
-        self._sound_progress.grid(column=1, row=1, columnspan=3, sticky=tk.NSEW, padx=10, pady=10)
+        ttk.Label(audio_serial_frame, text="Audio level (preview):").grid(row=1, column=0, padx=10, pady=10, sticky=tk.E)
+        self._sound_progress = ttk.Progressbar(audio_serial_frame, orient=tk.HORIZONTAL, mode='determinate')
+        self._sound_progress.grid(column=1, row=1, columnspan=2, sticky=tk.NSEW, padx=10, pady=10)
+
+        audio_serial_frame.columnconfigure(1, weight=1)
+        audio_serial_frame.grid(row=0, column=0, columnspan=6, sticky=tk.NSEW)
 
         # Sweep settings
-        # TODO: Move increments to inline with their respective field
-        ttk.Label(tab, text="Piezo duty min (%):").grid(row=2, padx=10, pady=10, sticky=tk.W)
+        # Piezo
+        ttk.Label(tab, text="Piezo duty min (%):").grid(row=1, padx=10, pady=10, sticky=tk.E)
         self._piezo_duty_min_text = tk.StringVar(value=5)
-        piezo_duty_min_spinbox = ttk.Spinbox(tab, from_=0, to=100, textvariable=self._piezo_duty_min_text)
-        piezo_duty_min_spinbox.grid(row=2, column=1, padx=10, pady=10, sticky=tk.W)
-        ttk.Label(tab, text="Piezo duty max (%):").grid(row=2, column=2, padx=10, pady=10, sticky=tk.W)
+        piezo_duty_min_spinbox = ttk.Spinbox(tab, from_=0, to=100, textvariable=self._piezo_duty_min_text, width=5)
+        piezo_duty_min_spinbox.grid(row=1, column=1, padx=10, pady=10, sticky=tk.W)
+        ttk.Label(tab, text="Piezo duty max (%):").grid(row=1, column=2, padx=10, pady=10, sticky=tk.E)
         self._piezo_duty_max_text = tk.StringVar(value=75)
-        piezo_duty_max_spinbox = ttk.Spinbox(tab, from_=0, to=100, textvariable=self._piezo_duty_max_text)
-        piezo_duty_max_spinbox.grid(row=2, column=3, padx=10, pady=10, sticky=tk.W)
-        ttk.Label(tab, text="Boost duty min (%):").grid(row=3, padx=10, pady=10, sticky=tk.W)
-        self._boost_duty_min_text = tk.StringVar(value=40)
-        boost_duty_min_spinbox = ttk.Spinbox(tab,  from_=0, to=100, textvariable=self._boost_duty_min_text)
-        boost_duty_min_spinbox.grid(row=3, column=1, padx=10, pady=10, sticky=tk.W)
-        ttk.Label(tab, text="Boost duty max (%):").grid(row=3, column=2, padx=10, pady=10, sticky=tk.W)
-        self._boost_duty_max_text = tk.StringVar(value=90)
-        boost_duty_max_spinbox = ttk.Spinbox(tab,  from_=0, to=100, textvariable=self._boost_duty_max_text)
-        boost_duty_max_spinbox.grid(row=3, column=3, padx=10, pady=10, sticky=tk.W)
-        ttk.Label(tab, text="MIDI note min:").grid(row=4, padx=10, pady=10, sticky=tk.W)
-        self._midi_min_text = tk.StringVar(value=20)
-        midi_min_spinbox = ttk.Spinbox(tab,  from_=0, to=127, textvariable=self._midi_min_text)
-        midi_min_spinbox.grid(row=4, column=1, padx=10, pady=10, sticky=tk.W)
-        ttk.Label(tab, text="MIDI note max:").grid(row=4, column=2, padx=10, pady=10, sticky=tk.W)
-        self._midi_max_text = tk.StringVar(value=127)
-        midi_max_spinbox = ttk.Spinbox(tab,  from_=0, to=127, textvariable=self._midi_max_text)
-        midi_max_spinbox.grid(row=4, column=3, padx=10, pady=10, sticky=tk.W)
-        # Increments (6 columns)
-        increments_frame = tk.Frame(tab)
-        ttk.Label(increments_frame, text="Piezo duty increment (%):").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
+        piezo_duty_max_spinbox = ttk.Spinbox(tab, from_=0, to=100, textvariable=self._piezo_duty_max_text, width=5)
+        piezo_duty_max_spinbox.grid(row=1, column=3, padx=10, pady=10, sticky=tk.W)
+        ttk.Label(tab, text="Piezo duty increment (%):").grid(row=1, column=4, padx=10, pady=10, sticky=tk.E)
         self._piezo_duty_inc_text = tk.StringVar(value=5)
-        piezo_duty_inc_spinbox = ttk.Spinbox(increments_frame,  from_=0, to=100, textvariable=self._piezo_duty_inc_text, width=10)
-        piezo_duty_inc_spinbox.grid(row=0, column=1, padx=10, pady=10, sticky=tk.W)
-        ttk.Label(increments_frame, text="Boost duty increment (%):").grid(row=0, column=2, padx=10, pady=10, sticky=tk.W)
+        piezo_duty_inc_spinbox = ttk.Spinbox(tab,  from_=0, to=100, textvariable=self._piezo_duty_inc_text, width=5)
+        piezo_duty_inc_spinbox.grid(row=1, column=5, padx=10, pady=10, sticky=tk.W)
+
+        # Boost
+        ttk.Label(tab, text="Boost duty min (%):").grid(row=2, padx=10, pady=10, sticky=tk.E)
+        self._boost_duty_min_text = tk.StringVar(value=40)
+        boost_duty_min_spinbox = ttk.Spinbox(tab,  from_=0, to=100, textvariable=self._boost_duty_min_text, width=5)
+        boost_duty_min_spinbox.grid(row=2, column=1, padx=10, pady=10, sticky=tk.W)
+        ttk.Label(tab, text="Boost duty max (%):").grid(row=2, column=2, padx=10, pady=10, sticky=tk.E)
+        self._boost_duty_max_text = tk.StringVar(value=90)
+        boost_duty_max_spinbox = ttk.Spinbox(tab,  from_=0, to=100, textvariable=self._boost_duty_max_text, width=5)
+        boost_duty_max_spinbox.grid(row=2, column=3, padx=10, pady=10, sticky=tk.W)
+        ttk.Label(tab, text="Boost duty increment (%):").grid(row=2, column=4, padx=10, pady=10, sticky=tk.E)
         self._boost_duty_inc_text = tk.StringVar(value=5)
-        boost_duty_inc_spinbox = ttk.Spinbox(increments_frame,  from_=0, to=100, textvariable=self._boost_duty_inc_text, width=10)
-        boost_duty_inc_spinbox.grid(row=0, column=3, padx=10, pady=10, sticky=tk.W)
-        ttk.Label(increments_frame, text="MIDI note increment:").grid(row=0, column=4, padx=10, pady=10, sticky=tk.W)
+        boost_duty_inc_spinbox = ttk.Spinbox(tab,  from_=0, to=100, textvariable=self._boost_duty_inc_text, width=5)
+        boost_duty_inc_spinbox.grid(row=2, column=5, padx=10, pady=10, sticky=tk.W)
+
+        # MIDI
+        ttk.Label(tab, text="MIDI note min:").grid(row=3, padx=10, pady=10, sticky=tk.E)
+        self._midi_min_text = tk.StringVar(value=20)
+        midi_min_spinbox = ttk.Spinbox(tab,  from_=0, to=127, textvariable=self._midi_min_text, width=5)
+        midi_min_spinbox.grid(row=3, column=1, padx=10, pady=10, sticky=tk.W)
+        ttk.Label(tab, text="MIDI note max:").grid(row=3, column=2, padx=10, pady=10, sticky=tk.E)
+        self._midi_max_text = tk.StringVar(value=127)
+        midi_max_spinbox = ttk.Spinbox(tab,  from_=0, to=127, textvariable=self._midi_max_text, width=5)
+        midi_max_spinbox.grid(row=3, column=3, padx=10, pady=10, sticky=tk.W)
+        ttk.Label(tab, text="MIDI note increment:").grid(row=3, column=4, padx=10, pady=10, sticky=tk.E)
         self._midi_inc_text = tk.StringVar(value=5)
-        midi_inc_spinbox = ttk.Spinbox(increments_frame,  from_=0, to=100, textvariable=self._midi_inc_text, width=10)
-        midi_inc_spinbox.grid(row=0, column=5, padx=10, pady=10, sticky=tk.W)
-        increments_frame.grid(row=5, column=0, columnspan=4, sticky=tk.NSEW)
+        midi_inc_spinbox = ttk.Spinbox(tab,  from_=0, to=100, textvariable=self._midi_inc_text, width=5)
+        midi_inc_spinbox.grid(row=3, column=5, padx=10, pady=10, sticky=tk.W)
 
         # Run test and progress bar
         self._test_control_button = ttk.Button(tab, text="Start test", command=self._confirm_run_test)
-        self._test_control_button.grid(row=6, padx=10, pady=10, columnspan=4, sticky=tk.NSEW)
+        self._test_control_button.grid(row=4, padx=10, pady=10, columnspan=6, sticky=tk.NSEW)
 
         self._test_progress = ttk.Progressbar(tab, orient=tk.HORIZONTAL, mode='determinate', length=800)
-        self._test_progress.grid(column=0, row=7, columnspan=4, sticky=tk.NSEW, padx=10, pady=10)
+        self._test_progress.grid(column=0, row=5, columnspan=6, sticky=tk.NSEW, padx=10, pady=10)
 
-        tab.columnconfigure(tuple(range(4)), weight=1)
+        update_serial_ports()
+        tab.columnconfigure(tuple(range(6)), weight=1)
 
     def _draw_save_load_tab(self, tab):
         ttk.Label(tab, text="Current file:").grid(row=0, column=0, sticky=tk.W, padx=10, pady=10)
@@ -998,22 +1020,24 @@ class GUI():
         ttk.Button(tab, text="Open", command=self._select_open_file).grid(row=0, column=3, padx=10, pady=10, sticky=tk.E)
         ttk.Button(tab, text="Save as", command=self._select_save_file).grid(row=0, column=4, padx=10, pady=10, sticky=tk.E)
 
-        # tab.columnconfigure((0, 2 ,3), weight=0)
         tab.columnconfigure(1, weight=2)
         # TODO: Show metadata and settings - possibly in a text box
 
     def _draw_results_tab(self, tab):
         self._results_fig = Figure()
         # Based of various examples
-        self._ax_loudness = self._results_fig.gca(projection='3d')
         self._results_cur_value = 0
-        self._data_manager.register_call_on_update(self._plot_results, True, False)
-        self._data_manager.register_call_on_update(self._update_results_scroll, True, False)
+        # Call on optimiser as we are now showing a dot for the chosen position
+        self._optimiser.register_call_on_recalculate(self._plot_results)
+        self._optimiser.register_call_on_recalculate(self._update_results_scroll)
 
         # Based off https://www.geeksforgeeks.org/how-to-embed-matplotlib-charts-in-tkinter-gui/
         # Create the Tkinter canvas containing the Matplotlib figure
         canvas = FigureCanvasTkAgg(self._results_fig, tab)
         canvas.draw()
+        # Need to set axis after setting canvass
+        self._ax_loudness = self._results_fig.gca(projection='3d')
+        self._results_fig.suptitle("Run a test or import some data to get started")
         canvas.get_tk_widget().pack()
 
         # Scroll bar
@@ -1060,13 +1084,22 @@ class GUI():
         self._optimiser.register_call_on_optimise_sucess(self._plot_optimisation)
 
     def _draw_help_tab(self, tab):
-        ttk.Label(tab, text="Bike Horn Optimiser version {}\nBy Jotham Gates\nThis is still a work in progress. For more info, go to:".format(version)).grid(row=0, column=0, padx=10, pady=(10, 0), sticky=tk.W)
+        ttk.Label(tab, text="{} version {}".format(name, version), font=("", 15, "bold")).grid(padx=10, pady=(10, 0), sticky=tk.W)
+        ttk.Label(tab, text=
+"""By Jotham Gates
+This is still a work in progress. For more info, go to:""").grid(padx=10, pady=(10, 0), sticky=tk.W)
         # Link based off https://stackoverflow.com/a/23482749
         github = "https://github.com/jgOhYeah/BikeHorn"
         github_link = ttk.Label(tab, text=github, cursor="hand2", foreground="blue")
-        github_link.grid(padx=10, pady=(0, 10), sticky=tk.W, row=1, column=0)
+        github_link.grid(padx=10, pady=(0, 10), sticky=tk.W)
         github_link.bind("<Button-1>", lambda e: webbrowser.open_new_tab(github))
-        ttk.Label(tab, text="MAIN STEPS:\n1. Upload the optimising sketch to the horn.\n2. Run or open a test.\n3. Upload the optimised settings to the horn.\n4. Upload the main bike horn sketch to put the horn back in power saving mode.").grid(padx=10, pady=10, row=2, column=0, sticky=tk.W)
+        ttk.Label(tab, text="Main Steps:", font=("", 12, "bold")).grid(padx=10, pady=10, sticky=tk.W)
+        ttk.Label(tab, text=
+"""1. Upload the optimising sketch to the horn.
+2. Run or open a test.
+3. Adjust settings for and optimise the data in the 'Optimisation settings' tab.
+4. Upload the optimised settings to the horn.
+5. Upload the main bike horn sketch to put the horn back in power saving mode.""").grid(padx=10, pady=10, sticky=tk.W)
     
     def _draw_upload_tab(self, tab):
         ttk.Label(tab, text="Optimal timer 1 (piezo) compare as a function of timer 1 top").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
@@ -1091,17 +1124,29 @@ class GUI():
     def _draw_optimised_formulas(self):
         """Fills the text boxes with formulas
         """
+        def hex_list(lst):
+            result = ["["]
+            for i in lst:
+                if len(result) != 1:
+                    result.append(", ")
+                result.append("0x{:0>2x}".format(i))
+            result.append("]")
+            return "".join(result)
+
         if self._optimiser.is_optimisation_valid():
             # Sucess, draw the formulas
             timer1_contents = str(self._optimiser.get_t1_optimised())
             timer2_contents = str(self._optimiser.get_t2_optimised())
             self._replace_text_contents(self._timer1_human_readable, timer1_contents)
             self._replace_text_contents(self._timer2_human_readable, timer2_contents)
+            t1_list = list(self._optimiser.get_t1_optimised().to_bytes())
+            t2_list = list(self._optimiser.get_t2_optimised().to_bytes())
+            compiled_contents = """Starting from EEPROM address {} using {} bytes:
+{}
 
-            compiled_contents = "Starting from EEPROM address {}:\n{}\n\nStarting from EEPROM address {}:\n{}".format(
-                BikeHornInterface.EEPROM_TIMER1_PIECEWISE, self._optimiser.get_t1_optimised().to_bytes(),
-                BikeHornInterface.EEPROM_TIMER2_PIECEWISE, self._optimiser.get_t2_optimised().to_bytes()
-            )
+Starting from EEPROM address {} using {} bytes:
+{}""".format(BikeHornInterface.EEPROM_TIMER1_PIECEWISE, len(t1_list), hex_list(t1_list),
+             BikeHornInterface.EEPROM_TIMER2_PIECEWISE, len(t2_list), hex_list(t2_list))
             self._replace_text_contents(self._to_upload_text, compiled_contents)
         else:
             # No success
@@ -1240,8 +1285,14 @@ class GUI():
                 self._ax_loudness.set_ylabel("Boost Duty Cycle [%]")
                 self._ax_loudness.set_zlabel("Loudness")
                 self._ax_loudness.plot_surface(piezo_mesh, boost_mesh, loudness, color="b")
+                best_piezo, best_boost, best_loudness = self._optimiser.chosen_coords(val)
+                best_path = self._ax_loudness.scatter([best_piezo], [best_boost], [best_loudness], marker="o", color="r")
+                best_path.set_sizes([20])
                 self._ax_loudness.set_xlim3d(piezo_mesh[0,0], piezo_mesh[-1,-1])
                 self._ax_loudness.set_ylim3d(boost_mesh[0,0], boost_mesh[-1,-1])
+                custom_legend = [Patch(facecolor='blue', edgecolor='blue', label='Measured'),
+                                 Line2D([0], [0], marker='o', color='w', label='Best (Chosen)', markerfacecolor='r', markersize=8)]
+                self._ax_loudness.legend(handles=custom_legend)
 
                 # Update
                 self._results_fig.canvas.draw_idle()
