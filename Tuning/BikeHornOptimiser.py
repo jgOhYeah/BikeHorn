@@ -36,6 +36,7 @@ import datetime
 # TODO: Load / save a default settings file automatically (not necessary, but might be convenient)
 # TODO: Guard against negative numbers in timer settings
 # TODO: Standard deviation / different from those around a data point as a measure of uncertainty when fitting to avoid noise / didgy data
+# TODO: Cope with someone trying to test, optimise and upload at the same time
 
 name = "Bike Horn Optimiser Tool"
 version = "0.0.2"
@@ -223,19 +224,9 @@ class BikeHornInterface():
         self.close_port()
 
         self._serial_port.port = port_name
+        # self._serial_port.port = "/tmp/ttyV0" # For monitoring the serial port https://unix.stackexchange.com/a/225904
         self._serial_port.baudrate = BikeHornInterface.BAUD
-        self._serial_port.timeout = 60
-
-        # Test the port
-        self._logging.info("Testing the serial port - ", end="")
-        try:
-            self._serial_port.open()
-            self._serial_port.close()
-        except SerialException:
-            msg = "Could not open serial port '{}'".format(port_name)
-            self._logging.warning(msg)
-        else:
-            self._logging.info("Success")
+        self._serial_port.timeout = 10
             
     def run_test(self, piezo_duty_values:Iterable, boost_duty_values:Iterable, midi_values:Iterable):
         """Runs the test
@@ -248,7 +239,9 @@ class BikeHornInterface():
         self._abort = False
         sound_data = []
         
-        self._start_test()
+        if not self._start_serial_port():
+            self.abort_test()
+
         if not self._abort:
             # Progress bar
             total_steps = len(piezo_duty_values) * len(boost_duty_values) * len(midi_values)
@@ -291,6 +284,8 @@ class BikeHornInterface():
             # Finished the test successfully
             self._shutdown()
             self._logging.info("Finished the test successfully", True)
+        else:
+            self._shutdown(False)
 
     def get_serial_ports(self):
         """Returns a list of serial ports.
@@ -319,6 +314,53 @@ class BikeHornInterface():
     def duty_to_counter_compare(self, duty, counter_top):
         return round(counter_top * duty / 100)
 
+    def upload(self, optimiser):
+        if not self._start_serial_port():
+            self._logging.warning("Serial port not started")
+            return
+        
+        self._logging.info("Starting upload")
+        self._logging.info("Uploading timer 1 (piezo) config")
+        if self._send_config(BikeHornInterface.EEPROM_TIMER1_PIECEWISE, optimiser.get_t1_optimised().to_bytes()):
+            # Only procede on success of previous
+            self._logging.info("Uploading timer 2 (boost) config")
+            if self._send_config(BikeHornInterface.EEPROM_TIMER2_PIECEWISE, optimiser.get_t2_optimised().to_bytes()):
+                self._logging.info("Successfully finished upload")
+
+    def _send_config(self, address, config):
+        self._logging.info("TODO: Address: {}, Config: {}".format(address, config))
+        if self._serial_port.isOpen():
+            # Write to serial port
+            self._serial_port.write("~`~`w{}~".format(address).encode('UTF-8'))
+            for i, data in enumerate(config):
+                if self._serial_port.isOpen():
+                    if i != len(config)-1:
+                        self._serial_port.write("{}~".format(data).encode('UTF-8'))
+                    else:
+                        self._serial_port.write("{}".format(data).encode('UTF-8'))
+                        # Send done
+                        self._serial_port.write("`~`~".encode('UTF-8'))
+
+                    # Wait for acknowledge
+                    response = self._serial_port.read_until("`~`~".encode('UTF-8'))
+                    if "~`~`W`~`~" not in str(response):
+                        self._logging.error("Lost connection to horn - no intermediate acknowledge received")
+                        return False
+
+                else:
+                    self._logging.error("Lost connection to horn - serial port closed unexpectedly")
+                    return False
+            
+            # Wait for acknowledge
+            response = self._serial_port.read_until("`~`~".encode('UTF-8'))
+            if "~`~`Ack`~`~" not in str(response):
+                self._logging.error("Lost connection to horn - no final acknowledge received")
+                return False
+        else:
+            self._logging.error("Lost connection to horn - serial port closed unexpectedly")
+            return False
+        return True
+
     def _get_data_point(self, midi, boost, piezo):
         if self._serial_port.isOpen():
             # Write to serial port
@@ -341,26 +383,32 @@ class BikeHornInterface():
             self.abort_test()
 
 
-    def _start_test(self):
+    def _start_serial_port(self):
+        """Attempts to open the serial port and talk to the horn.
+
+        Returns:
+            bool: True if successful, Fase otherwise
+        """
         self._logging.info("Opening the serial port")
         try:
             self._serial_port.open()
         except SerialException:
-            msg = "Could not open serial port"
-            self._logging.warning(msg)
-            return
+            self._logging.error("Could not open serial port")
+            return False
         
         if self._serial_port.isOpen():
             response = self._serial_port.read_until("`~`~".encode('UTF-8'))
-            print(response)
             if "~`~`Ready`~`~" not in str(response):
                 # Failure
                 self._logging.error("Did not get a response from the the horn")
-                self.abort_test()
+                return False
         else:
             # Port closed
             self._logging.error("Serial port is closed")
-            self.abort_test()
+            return False
+        
+        self._logging.info("Opened port and got response")
+        return True
     
     def _shut_up(self, require_response=True):
         if self._serial_port.isOpen():
@@ -537,6 +585,14 @@ class PiecewiseLinear():
         y.append(self.apply(maximum))
         
         return x, y
+    def clip(self, y_min, y_max, x_min, x_max) -> bool:
+        """Clips the piecewise function to not go above or below the given y range for the given x range
+
+        Returns:
+            bool: True if clipping was performed, False if not required
+        """
+        # TODO
+        pass
 
     def transform(self, x_transform, y_transform, minimum, maximum):
         """Generates and returns a new piecewise function where the x and y coordinates have been
@@ -748,7 +804,7 @@ class GUI():
         self._data_manager = data_manager
         self._optimiser = optimiser
         self._call_on_exit = []
-
+        self._has_port = False
         self._data_manager.register_call_on_update(self.set_settings, False, True)
 
 
@@ -779,15 +835,20 @@ class GUI():
         # Message output
         ttk.Label(self._root, text="Messages").pack(side=tk.LEFT, padx=10, pady=10)
         messages_frame, self._text_messages = self._draw_scrollable_text(self._root, 5)
+        self._text_messages.tag_config('warning', background="yellow", foreground="red") # Colours based off https://stackoverflow.com/a/47592287
+        self._text_messages.tag_config('error', background="red", foreground="white")
         messages_frame.pack(expand=True, fill='x')
         
+        # Put the name and version
+        self._logging.info("{} version {}".format(name, version))
+
         # Fill up the tabs (after drawing the monitor so they can log to it)
+        self._draw_upload_tab(upload_settings_tab) # Run test needs to enable and disable upload button
         self._draw_run_test_tab(run_test_tab)
         self._draw_save_load_tab(save_load_tab)
         self._save_settings()
         self._draw_results_tab(view_results_tab)
         self._draw_optimisation_tab(optimisation_tab)
-        self._draw_upload_tab(upload_settings_tab)
         self._draw_help_tab(help_tab)
 
         self._root.protocol("WM_DELETE_WINDOW", self._close_window)
@@ -852,7 +913,7 @@ class GUI():
 
         # Set the progress bar to 0 if note successful or make sure it is at the end if success
         if success:
-            self.update_test_progress(1)
+            self.update_test_progress(100)
         else:
             self.update_test_progress(0)
 
@@ -869,10 +930,13 @@ class GUI():
     def error_dialog(self, msg=""):
         tkmb.showerror("Error", msg)
 
-    def add_monitor_text(self, msg="", end="\n"):
+    def add_monitor_text(self, msg="", end="\n", tag=None):
         fully_scrolled_down = self._text_messages.yview()[1] == 1.0 # Scrolling based off https://stackoverflow.com/a/51781603
         self._text_messages.configure(state='normal')
-        self._text_messages.insert('end', "{}{}".format(msg,end))
+        if tag is not None:
+            self._text_messages.insert('end', "{}{}".format(msg,end), tag)
+        else:
+            self._text_messages.insert('end', "{}{}".format(msg,end))
         self._text_messages.configure(state='disabled')
         if fully_scrolled_down:
             self._text_messages.see("end")
@@ -940,9 +1004,12 @@ class GUI():
             if len(ports) == 0:
                 ports.append("No serial ports found")
                 self._test_control_button["state"] = tk.DISABLED
+                self._has_port = False
             else:
                 self._test_control_button["state"] = tk.NORMAL
+                self._has_port = True
             self._serial_port_dropdown.set_menu(*ports)
+            self._update_upload_button()
 
         self._serial_port = tk.StringVar(self._root)
         audio_serial_frame = tk.Frame(tab)
@@ -1102,6 +1169,20 @@ This is still a work in progress. For more info, go to:""").grid(padx=10, pady=(
 5. Upload the main bike horn sketch to put the horn back in power saving mode.""").grid(padx=10, pady=10, sticky=tk.W)
     
     def _draw_upload_tab(self, tab):
+        def run_upload():
+            self._upload_button["state"] = tk.DISABLED
+            self._bike_horn.upload(self._optimiser)
+            self._upload_button["state"] = tk.NORMAL
+
+        def confirm_upload():
+            """Confirms with the user whether to upload the data
+            """
+            result = tkmb.askyesno("Confirm upload", "Are you sure you want to upload the current optimised settings? Any existing settings on the horn will be lost.")
+            if result:
+                self._bike_horn.set_serial_port(self._serial_port.get())
+                upload_thread = threading.Thread(target=run_upload, daemon=True)
+                upload_thread.start()
+
         ttk.Label(tab, text="Optimal timer 1 (piezo) compare as a function of timer 1 top").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
         frame, self._timer1_human_readable = self._draw_scrollable_text(tab, 4)
         frame.grid(row=1, sticky=tk.NSEW, padx=10, pady=(0, 10))
@@ -1111,13 +1192,16 @@ This is still a work in progress. For more info, go to:""").grid(padx=10, pady=(
         ttk.Label(tab, text="Compiled settings that will be uploaded").grid(row=4, column=0, padx=10, pady=10, sticky=tk.NSEW)
         frame, self._to_upload_text = self._draw_scrollable_text(tab, 5)
         frame.grid(row=5, sticky=tk.NSEW, padx=10, pady=(0, 10))
-        self._upload_button = ttk.Button(tab, text="Upload to horn (WHEN IMPLEMENTED)")
+        self._upload_button = ttk.Button(tab, text="Upload to horn (set the serial port in the 'Run test / Serial' tab)", command=confirm_upload)
         self._upload_button.grid(row=6, column=0, padx=10, pady=10, sticky=tk.NSEW)
         self._upload_button["state"] = tk.DISABLED
 
         self._draw_optimised_formulas()
+        self._update_upload_button()
         self._optimiser.register_call_on_recalculate(self._draw_optimised_formulas)
         self._optimiser.register_call_on_optimise_sucess(self._draw_optimised_formulas)
+        self._optimiser.register_call_on_recalculate(self._update_upload_button)
+        self._optimiser.register_call_on_optimise_sucess(self._update_upload_button)
         tab.columnconfigure(0, weight=1)
         tab.rowconfigure((1, 3, 5), weight=1)
 
@@ -1221,6 +1305,14 @@ Starting from EEPROM address {} using {} bytes:
         self._ax_piezo_best.legend()
 
         self._optimiser_fig.canvas.draw_idle()
+
+    def _update_upload_button(self):
+        if self._has_port and self._optimiser.is_optimisation_valid():
+            # We can upload data
+            self._upload_button["state"] = tk.NORMAL
+        else:
+            # Cannot upload data
+            self._upload_button["state"] = tk.DISABLED
 
     def _plot_results_scroll(self, instruction=None, amount=None, units=None):
         max_index = len(self._data_manager.get_sound_data())-1
@@ -1348,7 +1440,7 @@ class Logging():
         self._gui = gui
 
     def info(self, msg="", end="\n", dialog=False) -> None:
-        print(msg)
+        print(msg, end=end)
         if self._gui:
             self._gui.add_monitor_text(msg, end)
             if dialog:
@@ -1358,14 +1450,14 @@ class Logging():
         warning_msg = "WARNING: {}".format(msg)
         print(warning_msg)
         if self._gui:
-            self._gui.add_monitor_text(warning_msg)
+            self._gui.add_monitor_text(warning_msg, tag="warning")
             # self.gui.warning_dialog(msg)
     
     def error(self, msg="") -> None:
         error_msg = "ERROR: {}".format(msg)
         print(error_msg)
         if self._gui:
-            self._gui.add_monitor_text(error_msg)
+            self._gui.add_monitor_text(error_msg, tag="error")
             self._gui.error_dialog(msg)
 
 class AudioLevels():
