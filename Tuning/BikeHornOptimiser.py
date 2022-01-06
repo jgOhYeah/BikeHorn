@@ -32,14 +32,45 @@ import numpy as np
 import threading
 from typing import Iterable, Tuple
 import datetime
+from enum import Enum, auto
 
 # TODO: Load / save a default settings file automatically (not necessary, but might be convenient)
-# TODO: Guard against negative numbers in timer settings
 # TODO: Standard deviation / different from those around a data point as a measure of uncertainty when fitting to avoid noise / didgy data
 # TODO: Cope with someone trying to test, optimise and upload at the same time
+# TODO: EEPROM Dump tab (displays the result of sending '~`~`r`~`~')
 
 name = "Bike Horn Optimiser Tool"
 version = "0.0.2"
+
+class Logging():
+    """Class for logging events and displaying them in appropriate locations
+    """
+    def __init__(self, gui=None) -> None:
+        self._gui = gui
+
+    def set_gui(self, gui=None) -> None:
+        self._gui = gui
+
+    def info(self, msg="", end="\n", dialog=False) -> None:
+        print(msg, end=end)
+        if self._gui:
+            self._gui.add_monitor_text(msg, end)
+            if dialog:
+                self._gui.info_dialog(msg)
+
+    def warning(self, msg="") -> None:
+        warning_msg = "WARNING: {}".format(msg)
+        print(warning_msg)
+        if self._gui:
+            self._gui.add_monitor_text(warning_msg, tag="warning")
+            # self.gui.warning_dialog(msg)
+    
+    def error(self, msg="") -> None:
+        error_msg = "ERROR: {}".format(msg)
+        print(error_msg)
+        if self._gui:
+            self._gui.add_monitor_text(error_msg, tag="error")
+            self._gui.error_dialog(msg)
 
 class DataManager():
     """Class to handle all data and the loading and saving of it
@@ -198,6 +229,7 @@ class BikeHornInterface():
     
     EEPROM_TIMER1_PIECEWISE = 1 # // TODO: Work out bytes and addresses that don't interfere with EEPROM wear leveling 
     EEPROM_TIMER2_PIECEWISE = 82 # // 81 bytes for up to 10 points
+    MAX_POINTS = 10
     
 
     def __init__(self, logging, data_manager, audio=None, gui=None):
@@ -326,9 +358,25 @@ class BikeHornInterface():
             self._logging.info("Uploading timer 2 (boost) config")
             if self._send_config(BikeHornInterface.EEPROM_TIMER2_PIECEWISE, optimiser.get_t2_optimised().to_bytes()):
                 self._logging.info("Successfully finished upload")
+    
+    def dump_eeprom(self) -> str:
+        """Dumps the eeprom and returns a table"""
+        if not self._start_serial_port():
+            self._logging.warning("Serial port not started")
+            return
+        
+        self._logging.info("Requesting EEPROM dump")
+        self._serial_port.write("~`~`r`~`~".encode("UTF-8"))
+        response = self._serial_port.read_until("~`~`Ack`~`~".encode('UTF-8'))
+        if "~`~`Ack`~`~".encode("UTF-8") not in response:
+            self._logging.error("Something went wrong getting the EEPROM dump")
+        else:
+            self._logging.info("Got EEPROM dump successfully")
+
+        return response
 
     def _send_config(self, address, config):
-        self._logging.info("TODO: Address: {}, Config: {}".format(address, config))
+        self._logging.info("Address: {}, Config: {}".format(address, config))
         if self._serial_port.isOpen():
             # Write to serial port
             self._serial_port.write("~`~`w{}~".format(address).encode('UTF-8'))
@@ -460,6 +508,10 @@ class LinearFunction():
         """
         numerator, denominator = self._multiplier_as_fraction()
         return numerator.to_bytes(1, "little", signed=False) + denominator.to_bytes(1, 'little', signed=True) + self.c.to_bytes(4, 'little', signed=True)
+    
+    def solve_for_x(self, y):
+        """Solves the function for x at a given y value"""
+        return (y - self.c) / self.m
 
     def _multiplier_as_fraction(self) -> tuple:
         """Converts the multiplier to a fraction where the numerator is at most MAX_MULTIPLIER
@@ -484,6 +536,11 @@ class LinearFunction():
 
         return numerator, denominator
 
+    def __eq__(self, other):
+        return self.m == other.m and self.c == other.c
+    
+    def __ne__(self, other):
+        return not self.__eq__(other)
 
     def __str__(self):
         numerator, denominator = self._multiplier_as_fraction()
@@ -521,7 +578,7 @@ class PiecewiseLinear():
             assert len(x_coords) == len(y_coords), "Mismatch in coordinate length"
             for i in range(1, len(x_coords)):
                 m = (y_coords[i] - y_coords[i-1]) / (x_coords[i] - x_coords[i-1])
-                self._functions.append((LinearFunction(m, x_coords[i], y_coords[i]), x_coords[i]))
+                self._functions.append((LinearFunction(m, x_coords[i-1], y_coords[i-1]), x_coords[i-1]))
             
             # Sort in case the transform made it out of order
             self._functions.sort(key=lambda x: x[1])
@@ -585,14 +642,103 @@ class PiecewiseLinear():
         y.append(self.apply(maximum))
         
         return x, y
-    def clip(self, y_min, y_max, x_min, x_max) -> bool:
+    def clip(self, y_min, y_max, x_min, x_max):
         """Clips the piecewise function to not go above or below the given y range for the given x range
 
         Returns:
-            bool: True if clipping was performed, False if not required
+            bool: A new PiecewiseFunction if clipping was performed, None otherwise
         """
-        # TODO
-        pass
+        # Build a list of x coordinates to operate over
+        x_coords = [x_min]
+
+        for _, threshold in self._functions:
+            if x_min < threshold < x_max:
+                x_coords.append(threshold)
+        
+        x_coords.append(x_max)
+        
+        clipping = False
+        new_x = []
+        new_y = []
+
+        # Add and clip first point if required
+        current = self.apply(x_coords[0])
+        if current > y_max:
+            new_x.append(x_coords[0])
+            new_y.append(y_max)
+        elif current < y_min:
+            new_x.append(x_coords[0])
+            new_y.append(y_min)
+
+        for i in range(1, len(x_coords)):
+            # 9 Cases
+            cur_func = self.function_for_given(x_coords[i-1])
+            previous = cur_func.apply(x_coords[i-1])
+            current = cur_func.apply(x_coords[i])
+            if previous > y_max and current > y_max:
+                # Always above, do not add anything
+                clipping = True
+            elif y_min <= previous <= y_max and y_min <= current <= y_max:
+                # Always in, add previous (only case of not clipping)
+                new_x.append(x_coords[i-1])
+                new_y.append(previous)
+            elif previous < y_min and current < y_min:
+                # Always below, do nothing
+                clipping = True
+            elif previous > y_max and y_min <= current <= y_max:
+                # Above going in, add crossover point
+                clipping = True
+                crossover = cur_func.solve_for_x(y_max)
+                new_x.append(crossover)
+                new_y.append(y_max)
+            elif y_min <= previous <= y_max and current < y_min:
+                # In going below, add previous and crossover
+                clipping = True
+                new_x.append(x_coords[i-1])
+                new_y.append(previous)
+                crossover = cur_func.solve_for_x(y_min)
+                new_x.append(crossover)
+                new_y.append(y_min)
+            elif previous < y_min and current > y_max:
+                # Below going to above, add crossover points
+                clipping = True
+                crossover = cur_func.solve_for_x(y_min)
+                new_x.append(crossover)
+                new_y.append(y_min)
+                crossover = cur_func.solve_for_x(y_max)
+                new_x.append(crossover)
+                new_y.append(y_max)
+            elif previous > y_max and current < y_min:
+                # Above going below, add crossover points
+                clipping = True
+                crossover = cur_func.solve_for_x(y_max)
+                new_x.append(crossover)
+                new_y.append(y_max)
+                crossover = cur_func.solve_for_x(y_min)
+                new_x.append(crossover)
+                new_y.append(y_min)
+            elif y_min <= previous <= y_max and current > y_max:
+                # In going above, add previous and crossover point
+                clipping = True
+                new_x.append(x_coords[i-1])
+                new_y.append(previous)
+                crossover = cur_func.solve_for_x(y_max)
+                new_x.append(crossover)
+                new_y.append(y_max)
+            elif previous < y_min and y_min <= current <= y_max:
+                # Below going in, add crossover
+                crossover = cur_func.solve_for_x(y_min)
+                new_x.append(crossover)
+                new_y.append(y_min)
+
+        # Add the last point
+        new_x.append(x_coords[-1])
+        new_y.append(max(min(self._functions[-1][0].apply(x_coords[-1]), y_max), y_min))
+
+        if clipping:
+            return PiecewiseLinear(None, None, new_x, new_y)
+        else:
+            return None
 
     def transform(self, x_transform, y_transform, minimum, maximum):
         """Generates and returns a new piecewise function where the x and y coordinates have been
@@ -641,6 +787,9 @@ class PiecewiseLinear():
 
 
 class Optimiser():
+    MIN_MIDI_NOTE = 23 # Due to maths and timers, this is the lowest playable note
+    MAX_MIDI_NOTE = 127
+
     def __init__(self, logging, data_manager:DataManager, bike_horn:BikeHornInterface, gui=None):
         self._data_manager = data_manager
         self._logging = logging
@@ -654,8 +803,8 @@ class Optimiser():
         self._best_loudness = np.empty(1)
         self._piezo_optimised = None
         self._boost_optimised = None
-        self._boost_optimisation_valid = -1
-        self._piezo_optimisation_valid = -1
+        self._boost_optimisation_valid = None
+        self._piezo_optimisation_valid = None
     
     def set_gui(self, gui=None):
         self._gui = gui
@@ -667,8 +816,8 @@ class Optimiser():
         self._call_on_optimise_success.append(method)
     
     def _recalculate(self):
-        self._boost_optimisation_valid = -1
-        self._piezo_optimisation_valid = -1
+        self._boost_optimisation_valid = None
+        self._piezo_optimisation_valid = None
 
         sound_data = np.array(self._data_manager.get_sound_data())
 
@@ -693,45 +842,77 @@ class Optimiser():
     def optimise(self, piezo_breakpoints, boost_breakpoints):
         """Processes the data to get linear functions (time consuming)
         """
+        def settings_tuple(breakpoints:int, range:range):
+            return breakpoints, range.start, range.stop
+
         # Test if there is enough data
         if len(self._best_piezo_duty) >= 3 and len(self._best_boost_duty) >= 3:
             midi_notes = list(self._data_manager.get_midi_range())
 
             # Try the piezo regression if needed
-            if self._piezo_optimisation_valid != piezo_breakpoints:
+            piezo_range = self._data_manager.get_piezo_range()
+            if self._piezo_optimisation_valid != settings_tuple(piezo_breakpoints, piezo_range):
                 self._logging.info("Fitting piezo data with {} breakpoints".format(piezo_breakpoints))
                 piezo_fit = piecewise_regression.Fit(midi_notes, self._best_piezo_duty, n_breakpoints=piezo_breakpoints)
                 piezo_fit_results = piezo_fit.get_results()
                 if piezo_fit_results["converged"]:
                     # Piezo was successful.
                     self._piezo_optimised = PiecewiseLinear(piezo_fit_results, piezo_breakpoints)
-                    self._piezo_optimisation_valid = piezo_breakpoints
+
+                    # Check there isn't anything stupid happening with negatives or out of bounds
+                    clipped = self._piezo_optimised.clip(piezo_range.start, piezo_range.stop, Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE)
+                    if clipped is not None:
+                        base_msg = "When optimising the piezo data, at least 1 point was found outside the range [{}-{}] as set on the 'Run test / Serial' tab.".format(piezo_range[0], piezo_range[-1])
+                        if len(clipped) > BikeHornInterface.MAX_POINTS:
+                            self._piezo_optimisation_valid = None
+                            self._logging.error("{} This application attempted to add new lines to clip the function to this range, however there are now >{} the allowed points. See the 'Help / About' tab for more info.".format(base_msg, BikeHornInterface.MAX_POINTS))
+                            return
+                        else:
+                            self._logging.warning("{} Extra lines have been added to limit the function to this range.".format(base_msg))
+                            self._piezo_optimised = clipped
+                            self._piezo_optimisation_valid = settings_tuple(piezo_breakpoints, piezo_range)
+                    else:
+                        self._piezo_optimisation_valid = settings_tuple(piezo_breakpoints, piezo_range)
                 else:
-                    self._piezo_optimisation_valid = -1
+                    self._piezo_optimisation_valid = None
                     self._logging.error("The piezo results did not converge with {} breakpoints. Maybe try a different number?".format(piezo_breakpoints))
                     return
             else:
                 self._logging.info("Have already optimised the piezo results, so no point doing it again")
 
             # Try the boost regression if needed
-            if self._boost_optimisation_valid != boost_breakpoints:
+            boost_range = self._data_manager.get_boost_range()
+            if self._boost_optimisation_valid != settings_tuple(boost_breakpoints, boost_range):
                 self._logging.info("Fitting boost data with {} breakpoints".format(boost_breakpoints))
                 boost_fit = piecewise_regression.Fit(midi_notes, self._best_boost_duty, n_breakpoints=boost_breakpoints)
                 boost_fit_results = boost_fit.get_results()
                 if boost_fit_results["converged"]:
                     # Generate piecewise functions
                     self._boost_optimised = PiecewiseLinear(boost_fit_results, boost_breakpoints)
-                    self._boost_optimisation_valid = boost_breakpoints
+                    # Check there isn't anything stupid happening with negatives or out of bounds
+                    clipped = self._boost_optimised.clip(boost_range[0], boost_range[-1], Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE)
+                    if clipped is not None:
+                        base_msg = "When optimising the boost data, at least 1 point was found outside the range [{}-{}] as set on the 'Run test / Serial' tab.".format(boost_range[0], boost_range[-1])
+                        if len(clipped) > BikeHornInterface.MAX_POINTS:
+                            self._boost_optimisation_valid = None
+                            self._logging.error("{} This application attempted to add new lines to clip the function to this range, however there are now >{} the allowed points. See the 'Help / About' tab for more info.".format(base_msg, BikeHornInterface.MAX_POINTS))
+                            return
+                        else:
+                            self._logging.warning("{} Extra lines have been added to limit the function to this range.".format(base_msg))
+                            self._boost_optimised = clipped
+                            self._boost_optimisation_valid = settings_tuple(boost_breakpoints, boost_range)
+                    else:
+                        self._boost_optimisation_valid = settings_tuple(boost_breakpoints, boost_range)
                 else:
-                    self._boost_optimisation_valid = -1
+                    self._boost_optimisation_valid = None
                     self._logging.error("The boost results did not converge with {} breakpoints. Maybe try a different number?".format(boost_breakpoints))
                     return
             else:
                 self._logging.info("Have already optimised the boost results, so no point doing it again")
         else:
             self._logging.error("Not enough data points to optimise (or no data loaded)")
-            self._piezo_optimisation_valid = -1
-            self._boost_optimisation_valid = -1
+            self._piezo_optimisation_valid = None
+            self._boost_optimisation_valid = None
             return
         
         # Success. Call everything that needs to know
@@ -752,12 +933,12 @@ class Optimiser():
     def get_t1_optimised(self):
         x_transform = lambda x, _: self._bike_horn.midi_to_counter_top(x)
         y_transform = lambda x, y: self._bike_horn.duty_to_counter_compare(y, self._bike_horn.midi_to_counter_top(x))
-        return self._piezo_optimised.transform(x_transform, y_transform, 23, 127) # 23 is the lowest playable note
+        return self._piezo_optimised.transform(x_transform, y_transform, Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE)
     
     def get_t2_optimised(self):
         x_transform = lambda x, _: self._bike_horn.midi_to_counter_top(x)
         y_transform = lambda x, y: self._bike_horn.duty_to_counter_compare(y, 0xFF)
-        return self._boost_optimised.transform(x_transform, y_transform, 23, 127)
+        return self._boost_optimised.transform(x_transform, y_transform, Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE)
     
     def get_best_boost(self):
         return self._best_boost_duty
@@ -793,9 +974,10 @@ class Optimiser():
         Returns:
             bool: Whether the current optimisation data can be trusted
         """
-        return self._boost_optimisation_valid != -1 and self._piezo_optimisation_valid != -1
+        return self._boost_optimisation_valid != None and self._piezo_optimisation_valid != None
 
 class GUI():
+    ICON = 'icon.png'
     def __init__(self, logging, bike_horn:BikeHornInterface, data_manager:DataManager, optimiser:Optimiser):
         """Creates and runs the GUI
         """
@@ -814,7 +996,10 @@ class GUI():
         # GUI Setting up
         self._root = tk.Tk(className=name)
         self._root.title(name)
-        self._root.tk.call('wm', 'iconphoto', self._root._w, tk.PhotoImage(file='icon.png'))
+        try:
+            self._root.tk.call('wm', 'iconphoto', self._root._w, tk.PhotoImage(file=GUI.ICON))
+        except AttributeError:
+            print("Could not add or find as the icon '{}'".format(GUI.ICON))
 
         # Draw the tabbed layout
         tab_control = ttk.Notebook(self._root)
@@ -1071,13 +1256,14 @@ class GUI():
 
         # Run test and progress bar
         self._test_control_button = ttk.Button(tab, text="Start test", command=self._confirm_run_test)
-        self._test_control_button.grid(row=4, padx=10, pady=10, columnspan=6, sticky=tk.NSEW)
+        self._test_control_button.grid(row=5, padx=10, pady=(10, 0), columnspan=6, sticky=tk.NSEW)
 
         self._test_progress = ttk.Progressbar(tab, orient=tk.HORIZONTAL, mode='determinate', length=800)
-        self._test_progress.grid(column=0, row=5, columnspan=6, sticky=tk.NSEW, padx=10, pady=10)
+        self._test_progress.grid(column=0, row=6, columnspan=6, sticky=tk.NSEW, padx=10, pady=10)
 
         update_serial_ports()
         tab.columnconfigure(tuple(range(6)), weight=1)
+        tab.rowconfigure(4, weight=1)
 
     def _draw_save_load_tab(self, tab):
         ttk.Label(tab, text="Current file:").grid(row=0, column=0, sticky=tk.W, padx=10, pady=10)
@@ -1156,7 +1342,7 @@ class GUI():
 """By Jotham Gates
 This is still a work in progress. For more info, go to:""").grid(padx=10, pady=(10, 0), sticky=tk.W)
         # Link based off https://stackoverflow.com/a/23482749
-        github = "https://github.com/jgOhYeah/BikeHorn"
+        github = "https://github.com/jgOhYeah/BikeHorn/tree/main/Tuning"
         github_link = ttk.Label(tab, text=github, cursor="hand2", foreground="blue")
         github_link.grid(padx=10, pady=(0, 10), sticky=tk.W)
         github_link.bind("<Button-1>", lambda e: webbrowser.open_new_tab(github))
@@ -1167,6 +1353,18 @@ This is still a work in progress. For more info, go to:""").grid(padx=10, pady=(
 3. Adjust settings for and optimise the data in the 'Optimisation settings' tab.
 4. Upload the optimised settings to the horn.
 5. Upload the main bike horn sketch to put the horn back in power saving mode.""").grid(padx=10, pady=10, sticky=tk.W)
+        ttk.Label(tab, text="Why the limit of 10 lines (9 breakpoints) per parameter to optimise?", font=("", 12, "bold")).grid(padx=10, pady=10, sticky=tk.W)
+        ttk.Label(tab, text=
+"""The processed optimisations are stored in EEPROM memory in the Arduino microcontroller on the horn.
+This is limited to 1024 bytes on an Arduino Nano. Each linear function takes up 8 bytes. Because
+(as an optional feature) the EEPROM is also used for tracking the number of times and for how long
+the horn is used for battery life monitoring, this resource needs to be shared. Feel free to adjust
+the parameters for the amount and addresses to allocate in the source code of this optimiser and
+'defines.h' of the main bike horn sketch, making sure that they are in agreement for things to work
+as expected.""").grid(padx=10, pady=10, sticky=tk.W)
+        ttk.Button(tab, text="Dump EEPROM of a connected horn", command=self._dump_eeprom).grid(row=8, padx=10, pady=10, sticky=tk.NSEW)
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(7, weight=1)
     
     def _draw_upload_tab(self, tab):
         def run_upload():
@@ -1243,6 +1441,7 @@ Starting from EEPROM address {} using {} bytes:
         def run_optimise(piezo_breakpoints, boost_breakpoints):
             """Runs the optimising process and controls the button"""
             self._optimise_button["state"] = tk.DISABLED
+            self._save_settings()
             self._optimiser.optimise(piezo_breakpoints, boost_breakpoints)
             self._optimise_button["state"] = tk.NORMAL
         try:
@@ -1419,7 +1618,24 @@ Starting from EEPROM address {} using {} bytes:
         else:
             self._logging.info("Cancelled opening file")
 
+    def _dump_eeprom(self):
+        dump_window = tk.Toplevel(self._root)
+        dump_window.title("Dump Bike Horn EEPROM")
+        try:
+            dump_window.tk.call('wm', 'iconphoto', dump_window._w, tk.PhotoImage(file=GUI.ICON))
+        except AttributeError:
+            self._logging.warning("Could not add or find as the icon '{}'".format(GUI.ICON))
 
+        tk.Label(dump_window, text="EEPROM Dump (hexdump style, all values in hexadecimal)").pack(side='top')
+        frame, text = self._draw_scrollable_text(dump_window)
+        self._bike_horn.set_serial_port(self._serial_port.get())
+        self._replace_text_contents(text, "This would be a good place to put an Easter Egg :)")
+        frame.pack(expand=True, fill='both')
+
+        # Get the data from the horn
+        message = self._bike_horn.dump_eeprom()
+        self._replace_text_contents(text, message)
+        
     def _close_window(self):
         """Calls everything this is meant to call before closing, then destroys the window
         """
@@ -1429,36 +1645,6 @@ Starting from EEPROM address {} using {} bytes:
         
         # Dodgy bit to make stuff close in the right order
         self._root.destroy()
-
-class Logging():
-    """Class for logging events and displaying them in appropriate locations
-    """
-    def __init__(self, gui:GUI=None) -> None:
-        self._gui = gui
-
-    def set_gui(self, gui=None) -> None:
-        self._gui = gui
-
-    def info(self, msg="", end="\n", dialog=False) -> None:
-        print(msg, end=end)
-        if self._gui:
-            self._gui.add_monitor_text(msg, end)
-            if dialog:
-                self._gui.info_dialog(msg)
-
-    def warning(self, msg="") -> None:
-        warning_msg = "WARNING: {}".format(msg)
-        print(warning_msg)
-        if self._gui:
-            self._gui.add_monitor_text(warning_msg, tag="warning")
-            # self.gui.warning_dialog(msg)
-    
-    def error(self, msg="") -> None:
-        error_msg = "ERROR: {}".format(msg)
-        print(error_msg)
-        if self._gui:
-            self._gui.add_monitor_text(error_msg, tag="error")
-            self._gui.error_dialog(msg)
 
 class AudioLevels():
     def __init__(self, gui:GUI=None):
