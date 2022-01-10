@@ -251,8 +251,9 @@ class BikeHornInterface():
     TIMER_2_TOP = 255
     EEPROM_SIZE = 1024
     
-    EEPROM_TIMER1_PIECEWISE = 1 # // TODO: Work out bytes and addresses that don't interfere with EEPROM wear leveling 
-    EEPROM_TIMER2_PIECEWISE = 82 # // 81 bytes for up to 10 points
+    EEPROM_PIECEWISE_SIZE = 81
+    EEPROM_TIMER1_PIECEWISE = 0x35e
+    EEPROM_TIMER2_PIECEWISE = EEPROM_TIMER1_PIECEWISE + EEPROM_PIECEWISE_SIZE
     MAX_POINTS = 10
     
 
@@ -410,7 +411,7 @@ class BikeHornInterface():
         self._logging.info("Sending '0xff'*{} to EEPROM".format(BikeHornInterface.EEPROM_SIZE))
         self._send_config(0, data)
 
-    def _send_config(self, address, config): # TODO: Fix ack not received
+    def _send_config(self, address, config):
         self._logging.info("Address: {}, Config: {}".format(address, config))
         if self._serial_port.isOpen():
             # Write to serial port
@@ -532,12 +533,19 @@ class LinearFunction():
     MAX_CONSTANT = 2**31-1
 
     def __init__(self, gradient, x0, y0):
+        self.apply = np.frompyfunc(self.apply, 1, 1) # Allow numpy arrays to to element wise operations
         self.m = gradient
         self.c = int(round(y0-gradient*x0))
         assert self.c > -(LinearFunction.MAX_CONSTANT - 1) and self.c < LinearFunction.MAX_CONSTANT, "Constant ({}) is the wrong size".format(self.c)
     
-    def apply(self, x):
-        return self.m * x + self.c
+    def apply(self, x, approximate=False):
+        """Finds y for a given x
+        If approximate=True, does the maths as if it were done with integers and more limited number represenation on the Arduino"""
+        if approximate:
+            numerator, denominator = self._multiplier_as_fraction()
+            return (numerator * x) // denominator + self.c
+        else:
+            return self.m * x + self.c
 
     def to_bytes(self):
         """Returns bytes in the form multiplier, divisor, constant
@@ -587,6 +595,7 @@ class PiecewiseLinear():
     def __init__(self, fit=None, n_breakpoints=None, x_coords=None, y_coords=None):
         """Loads fit data in dictionary form from piecewise linear regression
         Use either fit and n_breakpoints or x_coords and y_coords, not both"""
+        self.apply = np.frompyfunc(self.apply, 1, 1) # Allow numpy arrays to to element wise operations
         self._functions = []
         if fit is not None and n_breakpoints is not None:
             # Generate from fit data dictionary
@@ -612,25 +621,38 @@ class PiecewiseLinear():
         else:
             # Generate from coordinates of the breakpoints and ends
             assert len(x_coords) == len(y_coords), "Mismatch in coordinate length"
-            for i in range(1, len(x_coords)):
-                m = (y_coords[i] - y_coords[i-1]) / (x_coords[i] - x_coords[i-1])
-                self._functions.append((LinearFunction(m, x_coords[i-1], y_coords[i-1]), x_coords[i-1]))
-            
-            # Sort in case the transform made it out of order
-            self._functions.sort(key=lambda x: x[1])
+
+            # Sort coordinates in case x is not in order (this class can only cope with 1 to 1 functions)
+            pairs = []
+            for i in range(len(x_coords)):
+                pairs.append((x_coords[i], y_coords[i]))
+            pairs.sort(key=lambda x: x[0])
+
+            # Build up linear functions
+            for i in range(1, len(pairs)):
+                prev_x = pairs[i-1][0]
+                prev_y = pairs[i-1][1]
+                cur_x = pairs[i][0]
+                cur_y = pairs[i][1]
+                m = (cur_y - prev_y) / (cur_x - prev_x)
+                self._functions.append((LinearFunction(m, prev_x, prev_y), prev_x))
+
             self._functions[0] = (self._functions[0][0], 0)
 
 
-    def apply(self, x: float) -> float:
+    def apply(self, x: float, approximate:bool = False) -> float:
         """Applies the piecewise function to the given number
 
         Args:
             x (float): Input number
+            approximate (bool, optional): If true, uses integer maths and limitations on number
+                                          sizes like the Arduino, otherwise uses floats and is more
+                                          accurate. Defaults to False.
 
         Returns:
             float: f(x) (i.e. the result)
-        """
-        return self.function_for_given(x).apply(x)
+        """        
+        return self.function_for_given(x).apply(x, approximate)
 
     def function_for_given(self, x:float) -> LinearFunction:
         """Returns the LinearFunction that would be used for a given number
@@ -667,6 +689,7 @@ class PiecewiseLinear():
         """
         Generates a tuple containing the x and y coordinates of each breakpoint + 1 each end that can be used to plot a graph
         """
+        assert minimum <= maximum, "Minimum must be less than Maximum"
         x = [minimum]
         y = [self.apply(minimum)]
         for _, threshold in self._functions:
@@ -678,6 +701,25 @@ class PiecewiseLinear():
         y.append(self.apply(maximum))
         
         return x, y
+
+    def as_approximate_lines(self, minimum, maximum) -> list:
+        assert minimum <= maximum, "Minimum must be less than Maximum"
+        lines = []
+        # Find the first threshold greater than the minimum
+        # for i in range(len(self._functions)):
+        #     if self._functions[i][1] > minimum:
+        #         break
+
+        for i in range(len(1, self._functions)):
+            prev = self._functions[i-1][1]
+            cur = self._functions[i][1]
+            func = self._functions[i-1][0]
+            lines.append(([prev, cur], [func.apply(prev, True), func.apply(cur, True)]))
+            # TODO: Max and min
+
+        return lines
+        
+
     def clip(self, y_min, y_max, x_min, x_max):
         """Clips the piecewise function to not go above or below the given y range for the given x range
 
@@ -782,8 +824,14 @@ class PiecewiseLinear():
         linear
 
         Args:
-            x_transform (function): Function that returns a number and accepts the existing x and y coordinates that will return new x coordinates
-            y_transform (function): Function that returns a number and accepts the existing x and y coordinates that will return new y coordinates
+            x_transform (function): Function that returns a number and accepts the existing x and y
+                                    coordinates that will return new x coordinates
+            y_transform (function): Function that returns a number and accepts the existing x and y
+                                    coordinates that will return new y coordinates
+            minimum (float):        Minimum x value in the original function to use (for getting the
+                                    gradient of the first line)
+            maximum (float):        Maximum y value in the original function to use (for getting the
+                                    gradient of the last line)
 
         Returns:
             PiecewiseLinear: New piecewise linear function with the transform from this one
@@ -827,6 +875,11 @@ class Optimiser():
     MAX_MIDI_NOTE = 127
 
     def __init__(self, logging, data_manager:DataManager, bike_horn:BikeHornInterface, gui=None):
+        # Allow stuff like linspace for the transforming functions
+        self._t1_y_transform = np.frompyfunc(self._t1_y_transform, 2, 1)
+        self._t2_y_transform = np.frompyfunc(self._t2_y_transform, 2, 1)
+        self._x_transform = np.frompyfunc(self._x_transform, 2, 1)
+
         self._data_manager = data_manager
         self._logging = logging
         self._bike_horn = bike_horn
@@ -967,15 +1020,25 @@ class Optimiser():
         return self._best_piezo_duty[index], self._best_boost_duty[index], self._best_loudness[index]
 
     def get_t1_optimised(self):
-        x_transform = lambda x, _: self._bike_horn.midi_to_counter_top(x)
-        y_transform = lambda x, y: self._bike_horn.duty_to_counter_compare(y, self._bike_horn.midi_to_counter_top(x))
-        return self._piezo_optimised.transform(x_transform, y_transform, Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE)
+        return self._piezo_optimised.transform(self._x_transform, self._t1_y_transform, Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE)
     
     def get_t2_optimised(self):
-        x_transform = lambda x, _: self._bike_horn.midi_to_counter_top(x)
-        y_transform = lambda x, y: self._bike_horn.duty_to_counter_compare(y, 0xFF)
-        return self._boost_optimised.transform(x_transform, y_transform, Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE)
+        return self._boost_optimised.transform(self._x_transform, self._t2_y_transform, Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE)
     
+    def get_t1_optimised_as_linspace(self, length=100):
+        x_orig = np.linspace(Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE, length)
+        y_orig = self._piezo_optimised.apply(x_orig)
+        x_new = self._x_transform(x_orig, y_orig)
+        y_new = self._t1_y_transform(x_orig, y_orig)
+        return x_new, y_new
+    
+    def get_t2_optimised_as_linspace(self, length=100):
+        x_orig = np.linspace(Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE, length)
+        y_orig = self._boost_optimised.apply(x_orig)
+        x_new = self._x_transform(x_orig, y_orig)
+        y_new = self._t2_y_transform(x_orig, y_orig)
+        return x_new, y_new
+
     def get_best_boost(self):
         return self._best_boost_duty
 
@@ -1011,6 +1074,15 @@ class Optimiser():
             bool: Whether the current optimisation data can be trusted
         """
         return self._boost_optimisation_valid != None and self._piezo_optimisation_valid != None
+    
+    def _x_transform(self, x, _):
+        return self._bike_horn.midi_to_counter_top(x)
+    
+    def _t1_y_transform(self, x, y):
+        return self._bike_horn.duty_to_counter_compare(y, self._bike_horn.midi_to_counter_top(x))
+    
+    def _t2_y_transform(self, x, y):
+        return self._bike_horn.duty_to_counter_compare(y, BikeHornInterface.TIMER_2_TOP)
 
 class GUI():
     ICON = 'icon.png'
@@ -1032,10 +1104,7 @@ class GUI():
         # GUI Setting up
         self._root = tk.Tk(className=name)
         self._root.title(name)
-        try:
-            self._root.tk.call('wm', 'iconphoto', self._root._w, tk.PhotoImage(file=GUI.ICON))
-        except AttributeError:
-            print("Could not add or find as the icon '{}'".format(GUI.ICON))
+        self._set_icon(self._root)
 
         # Draw the tabbed layout
         tab_control = ttk.Notebook(self._root)
@@ -1081,6 +1150,12 @@ class GUI():
     def run(self):
         # Ready for interaction
         self._root.mainloop()
+    
+    def _set_icon(self, window):
+        try:
+            window.tk.call('wm', 'iconphoto', self._root._w, tk.PhotoImage(file=GUI.ICON))
+        except (AttributeError, tk.TclError):
+            print("Could not add or find as the icon '{}'".format(GUI.ICON))
 
     def _draw_scrollable_text(self, parent, height=None, disabled=True):
         """Draws a frame containing 
@@ -1350,7 +1425,6 @@ class GUI():
         self._replace_text_contents(self._metadata_text, "Metadata will go here")
         frame.grid(row=2, column=0, sticky=tk.NSEW, padx=10)
         tab.columnconfigure(0, weight=1)
-        # TODO: Show metadata and settings - possibly in a text box
 
     def _draw_results_tab(self, tab):
         self._results_fig = Figure()
@@ -1563,13 +1637,27 @@ Starting from EEPROM address {} using {} bytes:
             self._ax_piezo_best.set_xlabel("Piezo (timer 1) top")
             self._ax_piezo_best.set_ylabel("Timer 1 compare")
 
-            midi = self._optimiser.get_t1_tops()[:len(self._data_manager)]
+            t1_tops = self._optimiser.get_t1_tops()[:len(self._data_manager)]
             best_boost = self._optimiser.get_best_t2_compare()
             best_piezo = self._optimiser.get_best_t1_compare()
 
             if self._optimiser.is_optimisation_valid():
-                boost_x, boost_y = self._optimiser.get_t1_optimised().as_coordinates(midi[0], midi[-1])
-                piezo_x, piezo_y = self._optimiser.get_t2_optimised().as_coordinates(midi[0], midi[-1])
+                min_x = self._bike_horn.midi_to_counter_top(Optimiser.MAX_MIDI_NOTE)
+                max_x = self._bike_horn.midi_to_counter_top(Optimiser.MIN_MIDI_NOTE)
+                boost_x, boost_y = self._optimiser.get_t2_optimised().as_coordinates(min_x, max_x)
+                piezo_x, piezo_y = self._optimiser.get_t1_optimised().as_coordinates(min_x, max_x)
+                self._ax_boost_best.plot(boost_x, boost_y, "o-", label="Optimised & simplified", color="C2")
+                self._ax_piezo_best.plot(piezo_x, piezo_y, "o-", label="Optimised & simplified", color="C2")
+
+                # Non linear transform
+                boost_non_lin_x, boost_non_lin_y = self._optimiser.get_t2_optimised_as_linspace(500)
+                piezo_non_lin_x, piezo_non_lin_y = self._optimiser.get_t1_optimised_as_linspace(500)
+                self._ax_boost_best.plot(boost_non_lin_x, boost_non_lin_y, ":", label="Optimised - Transformed from MIDI & % scales", color="C1")
+                self._ax_piezo_best.plot(piezo_non_lin_x, piezo_non_lin_y, ":", label="Optimised - Transformed from MIDI & % scales", color="C1")
+
+            self._ax_boost_best.plot(t1_tops, best_boost, label="Measured", color="C0")
+            self._ax_piezo_best.plot(t1_tops, best_piezo, label="Measured", color="C0")
+                
         else:
             # Show %
             self._ax_boost_best.set_title("Optimal boost duty cycle")
@@ -1583,15 +1671,13 @@ Starting from EEPROM address {} using {} bytes:
             best_piezo = self._optimiser.get_best_piezo()
 
             if self._optimiser.is_optimisation_valid():
-                boost_x, boost_y = self._optimiser.get_boost_optimised().as_coordinates(midi[0], midi[-1])
-                piezo_x, piezo_y = self._optimiser.get_piezo_optimised().as_coordinates(midi[0], midi[-1])
-        
-        self._ax_boost_best.plot(midi, best_boost, label="Measured")
-        self._ax_piezo_best.plot(midi, best_piezo, label="Measured")
-
-        if self._optimiser.is_optimisation_valid():
-            self._ax_boost_best.plot(boost_x, boost_y, label="Optimised")
-            self._ax_piezo_best.plot(piezo_x, piezo_y, label="Optimised")
+                boost_x, boost_y = self._optimiser.get_boost_optimised().as_coordinates(Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE)
+                piezo_x, piezo_y = self._optimiser.get_piezo_optimised().as_coordinates(Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE)
+                self._ax_boost_best.plot(boost_x, boost_y, "o-", label="Optimised", color="C1")
+                self._ax_piezo_best.plot(piezo_x, piezo_y, "o-", label="Optimised", color="C1")
+            
+            self._ax_boost_best.plot(midi, best_boost, label="Measured", color="C0")
+            self._ax_piezo_best.plot(midi, best_piezo, label="Measured", color="C0")
 
         self._ax_boost_best.legend()
         self._ax_piezo_best.legend()
@@ -1724,10 +1810,7 @@ Starting from EEPROM address {} using {} bytes:
     def _dump_eeprom(self):
         dump_window = tk.Toplevel(self._root)
         dump_window.title("Dump Bike Horn EEPROM")
-        try:
-            dump_window.tk.call('wm', 'iconphoto', dump_window._w, tk.PhotoImage(file=GUI.ICON))
-        except AttributeError:
-            self._logging.warning("Could not add or find as the icon '{}'".format(GUI.ICON))
+        self._set_icon(dump_window)
 
         tk.Label(dump_window, text="EEPROM Dump (hexdump style, all values in hexadecimal)").pack(side='top')
         frame, text = self._draw_scrollable_text(dump_window)
