@@ -125,27 +125,27 @@ class DataManager():
         # Load the file
         try:
             data = np.load(filename, allow_pickle=True)
-        except FileNotFoundError:
-            self._logging.error("The select file does not exist.")
+        except (FileNotFoundError, OSError):
+            self._logging.error("The select file does not exist or could not be opened.")
+        else:
+            # Find any metadata and print it
+            if "metadata" in data:
+                self._logging.info("Metadata found")
+                self._metadata = data["metadata"][()]
+                self._call_to_update_metadata()
 
-        # Find any metadata and print it
-        if "metadata" in data:
-            self._logging.info("Metadata found")
-            self._metadata = data["metadata"][()]
-            self._call_to_update_metadata()
+            # Check all required data is present
+            if not "sound_data" in data or not "settings" in data:
+                self._logging.error("There was an issue opening the file. Either 'sound_data' or 'settings' is missing. Are you sure this is a valid file?")
+                return
 
-        # Check all required data is present
-        if not "sound_data" in data or not "settings" in data:
-            self._logging.error("There was an issue opening the file. Either 'sound_data' or 'settings' is missing. Are you sure this is a valid file?")
-            return
+            # Unpacking tha data part
+            self._sound_data = data["sound_data"][()] # Cope with 0d arrays
+            self._settings = data["settings"][()]
 
-        # Unpacking tha data part
-        self._sound_data = data["sound_data"][()] # Cope with 0d arrays
-        self._settings = data["settings"][()]
-
-        # Notify stuff that needs to know
-        self._call_to_update_settings()
-        self._call_to_update_sound()
+            # Notify stuff that needs to know
+            self._call_to_update_settings()
+            self._call_to_update_sound()
     
     def set_settings(self, settings):
         self._settings = settings
@@ -528,30 +528,45 @@ class BikeHornInterface():
 class LinearFunction():
     """Class for a linear function
     """
-    MAX_MULTIPLIER = 255
-    MAX_DENOMINATOR = 127
+    MAX_MULTIPLIER = 127
+    MAX_DENOMINATOR = 255
     MAX_CONSTANT = 2**31-1
 
-    def __init__(self, gradient, x0, y0):
+    def __init__(self, gradient, x0, y0, target_min=None, target_max=None):
+        """Creates a new linear function
+
+        Args:
+            gradient (float): The gradient
+            x0 (float): An x coordinate on the line
+            y0 (float): A y coordinate on the line
+            target_min (float, optional): Lower x value in a range to focus on making close when
+                                          converting to integers. Defaults to None.
+            target_max (float, optional): Upper x value in a range to focus on making close when
+                                          converting to integers. Defaults to None.
+        """
         self.apply = np.frompyfunc(self.apply, 1, 1) # Allow numpy arrays to to element wise operations
+        self.approximate = np.frompyfunc(self.approximate, 1, 1)
         self.m = gradient
         self.c = int(round(y0-gradient*x0))
+        self._target_min = target_min
+        self._target_max = target_max
         assert self.c > -(LinearFunction.MAX_CONSTANT - 1) and self.c < LinearFunction.MAX_CONSTANT, "Constant ({}) is the wrong size".format(self.c)
     
-    def apply(self, x, approximate=False):
-        """Finds y for a given x
-        If approximate=True, does the maths as if it were done with integers and more limited number represenation on the Arduino"""
-        if approximate:
-            numerator, denominator = self._multiplier_as_fraction()
-            return (numerator * x) // denominator + self.c
-        else:
-            return self.m * x + self.c
+    def apply(self, x):
+        """Finds y for a given x"""
+        return self.m * x + self.c
+    
+    def approximate(self, x):
+        """Similar to apply, but does the maths as if it were done with integers and more limited
+        number represenation on the Arduino"""
+        numerator, denominator, constant = self._multiplier_as_fraction()
+        return (numerator * x) // denominator + constant
 
     def to_bytes(self):
         """Returns bytes in the form multiplier, divisor, constant
         """
-        numerator, denominator = self._multiplier_as_fraction()
-        return numerator.to_bytes(1, "little", signed=False) + denominator.to_bytes(1, 'little', signed=True) + self.c.to_bytes(4, 'little', signed=True)
+        numerator, denominator, constant = self._multiplier_as_fraction()
+        return numerator.to_bytes(1, "little", signed=True) + denominator.to_bytes(1, 'little', signed=False) + constant.to_bytes(4, 'little', signed=True)
     
     def solve_for_x(self, y):
         """Solves the function for x at a given y value"""
@@ -570,15 +585,22 @@ class LinearFunction():
             max_denominator = min(max(math.floor(LinearFunction.MAX_MULTIPLIER / abs(self.m)), 1), LinearFunction.MAX_DENOMINATOR)
             m_fraction = m_fraction.limit_denominator(max_denominator)
             assert abs(m_fraction.numerator) <= LinearFunction.MAX_MULTIPLIER, "Numerator is too big"
-            assert abs(m_fraction.denominator) <= LinearFunction.MAX_MULTIPLIER, "Denominator is too big"
-            
+            assert abs(m_fraction.denominator) <= LinearFunction.MAX_DENOMINATOR, "Denominator is too big"
             numerator = int(m_fraction.numerator)
             denominator = int(m_fraction.denominator)
-            if numerator < 0:
-                numerator = -numerator
-                denominator = -denominator
+        
+        # Calculate a new constant to make the line closer in the target area
+        focus_center = 0
+        if self._target_min is not None and self._target_max is not None:
+            focus_center = (self._target_min + self._target_max) / 2
+        elif self._target_min is not None:
+            focus_center = self._target_min
+        elif self._target_max is not None:
+            focus_center = self._target_max
+        distance = (numerator/denominator - self.m)*focus_center
+        constant = round(self.c - distance)
 
-        return numerator, denominator
+        return numerator, denominator, constant
 
     def __eq__(self, other):
         return self.m == other.m and self.c == other.c
@@ -587,15 +609,19 @@ class LinearFunction():
         return not self.__eq__(other)
 
     def __str__(self):
-        numerator, denominator = self._multiplier_as_fraction()
-        return "{:>5.0f}*x/{:>5.0f} + {:>5.0f}".format(numerator, denominator, self.c)
+        numerator, denominator, constant = self._multiplier_as_fraction()
+        return "{:>5.0f}*x/{:>5.0f} + {:>5.0f}".format(numerator, denominator, constant)
 
 class PiecewiseLinear():
     """Class for piecewise linear functions"""
-    def __init__(self, fit=None, n_breakpoints=None, x_coords=None, y_coords=None):
+    def __init__(self, fit=None, n_breakpoints=None, x_coords=None, y_coords=None, min_x=0, max_x=127):
         """Loads fit data in dictionary form from piecewise linear regression
         Use either fit and n_breakpoints or x_coords and y_coords, not both"""
         self.apply = np.frompyfunc(self.apply, 1, 1) # Allow numpy arrays to to element wise operations
+        self.approximate = np.frompyfunc(self.approximate, 1, 1)
+        self._min_x = min_x
+        self._max_x = max_x
+        
         self._functions = []
         if fit is not None and n_breakpoints is not None:
             # Generate from fit data dictionary
@@ -613,11 +639,15 @@ class PiecewiseLinear():
             # Function to the left of the first breakpoint
             m = get_est("alpha1")
             c = get_est("const")
-            self._functions.append((LinearFunction(m, 0, c), 0)) # The only alpha we can rely on (see https://github.com/chasmani/piecewise-regression/issues/3)
+            self._functions.append((LinearFunction(m, 0, c, target_min=self._min_x), 0)) # The only alpha we can rely on for now (see https://github.com/chasmani/piecewise-regression/issues/3)
             for i in range(n_breakpoints):
                 m += fit_poi[i][0] # Beta
                 c -= fit_poi[i][0]*fit_poi[i][1] # Beta * Breakpoint
-                self._functions.append((LinearFunction(m, 0, c), fit_poi[i][1]))
+
+                target_max = self._max_x
+                if i != n_breakpoints-1:
+                    target_max = fit_poi[i+1][1]
+                self._functions.append((LinearFunction(m, 0, c, target_min=fit_poi[i][1], target_max=target_max), fit_poi[i][1]))
         else:
             # Generate from coordinates of the breakpoints and ends
             assert len(x_coords) == len(y_coords), "Mismatch in coordinate length"
@@ -635,24 +665,25 @@ class PiecewiseLinear():
                 cur_x = pairs[i][0]
                 cur_y = pairs[i][1]
                 m = (cur_y - prev_y) / (cur_x - prev_x)
-                self._functions.append((LinearFunction(m, prev_x, prev_y), prev_x))
+                self._functions.append((LinearFunction(m, prev_x, prev_y, target_min=prev_x, target_max=cur_x), prev_x))
 
             self._functions[0] = (self._functions[0][0], 0)
 
 
-    def apply(self, x: float, approximate:bool = False) -> float:
+    def apply(self, x: float) -> float:
         """Applies the piecewise function to the given number
 
         Args:
             x (float): Input number
-            approximate (bool, optional): If true, uses integer maths and limitations on number
-                                          sizes like the Arduino, otherwise uses floats and is more
-                                          accurate. Defaults to False.
 
         Returns:
             float: f(x) (i.e. the result)
         """        
-        return self.function_for_given(x).apply(x, approximate)
+        return self.function_for_given(x).apply(x)
+
+    def approximate(self, x:float) -> int:
+        """Like apply, except uses integer maths and limitations on number sizes like the Arduino"""
+        return self.function_for_given(x).approximate(x)
 
     def function_for_given(self, x:float) -> LinearFunction:
         """Returns the LinearFunction that would be used for a given number
@@ -685,10 +716,15 @@ class PiecewiseLinear():
 
         return result
     
-    def as_coordinates(self, minimum, maximum) -> Tuple:
+    def as_coordinates(self, minimum=None, maximum=None) -> Tuple:
         """
         Generates a tuple containing the x and y coordinates of each breakpoint + 1 each end that can be used to plot a graph
         """
+        if minimum is None:
+            minimum = self._min_x
+        if maximum is None:
+            maximum = self._max_x
+
         assert minimum <= maximum, "Minimum must be less than Maximum"
         x = [minimum]
         y = [self.apply(minimum)]
@@ -702,30 +738,57 @@ class PiecewiseLinear():
         
         return x, y
 
-    def as_approximate_lines(self, minimum, maximum) -> list:
+    def as_approximate_lines(self, minimum=None, maximum=None) -> list:
+        """Generates a list of tuples of lines following integer maths
+
+        Args:
+            minimum (int): Minimum x coordinate
+            maximum (int): Maximum y coordinate
+
+        Returns:
+            list: List of tuples, where each tuple contains a list of x coordinates and a list of y
+                  coordinates. i.e. [([0, 1], [2, 3]), ([4, 5], [6, 7])] represents a line from
+                  (0, 2) to (1, 3) and another from (4, 6) to (5, 7)
+        """
+        if minimum is None:
+            minimum = self._min_x
+        if maximum is None:
+            maximum = self._max_x
+            
         assert minimum <= maximum, "Minimum must be less than Maximum"
         lines = []
-        # Find the first threshold greater than the minimum
-        # for i in range(len(self._functions)):
-        #     if self._functions[i][1] > minimum:
-        #         break
-
-        for i in range(len(1, self._functions)):
+        for i in range(1, len(self._functions)):
             prev = self._functions[i-1][1]
             cur = self._functions[i][1]
             func = self._functions[i-1][0]
-            lines.append(([prev, cur], [func.apply(prev, True), func.apply(cur, True)]))
-            # TODO: Max and min
+            if cur >= minimum:
+                if prev < minimum or (i==0 and minimum < prev):
+                    prev = minimum
+                if cur > maximum:
+                    cur = maximum
+                if prev > maximum:
+                    break
+                lines.append(([prev, cur], [func.approximate(prev), func.approximate(cur)]))
+        
+        if cur < maximum:
+            # We ran out of functions before getting to the maximum
+            func = self._functions[-1][0]
+            lines.append(([cur, maximum], [func.approximate(cur), func.approximate(maximum)]))
 
         return lines
         
 
-    def clip(self, y_min, y_max, x_min, x_max):
+    def clip(self, y_min, y_max, x_min=None, x_max=None):
         """Clips the piecewise function to not go above or below the given y range for the given x range
 
         Returns:
             bool: A new PiecewiseFunction if clipping was performed, None otherwise
         """
+        if x_min is None:
+            x_min = self._min_x
+        if x_max is None:
+            x_max = self._max_x
+            
         # Build a list of x coordinates to operate over
         x_coords = [x_min]
 
@@ -814,11 +877,11 @@ class PiecewiseLinear():
         new_y.append(max(min(self._functions[-1][0].apply(x_coords[-1]), y_max), y_min))
 
         if clipping:
-            return PiecewiseLinear(None, None, new_x, new_y)
+            return PiecewiseLinear(None, None, new_x, new_y, min_x=self._min_x, max_x=self._max_x)
         else:
             return None
 
-    def transform(self, x_transform, y_transform, minimum, maximum):
+    def transform(self, x_transform, y_transform, minimum=None, maximum=None):
         """Generates and returns a new piecewise function where the x and y coordinates have been
         transformed in certain ways. Only mathematically equivalent if the transforms are
         linear
@@ -836,6 +899,11 @@ class PiecewiseLinear():
         Returns:
             PiecewiseLinear: New piecewise linear function with the transform from this one
         """
+        if minimum is None:
+            minimum = self._min_x
+        if maximum is None:
+            maximum = self._max_x
+            
         x, y = self.as_coordinates(minimum, maximum)
         x_coords = []
         y_coords = []
@@ -843,7 +911,7 @@ class PiecewiseLinear():
             x_coords.append(x_transform(x[i], y[i]))
             y_coords.append(y_transform(x[i], y[i]))
 
-        return PiecewiseLinear(fit=None, n_breakpoints=None, x_coords=x_coords, y_coords=y_coords)
+        return PiecewiseLinear(fit=None, n_breakpoints=None, x_coords=x_coords, y_coords=y_coords, min_x=min(x_coords), max_x=max(x_coords))
 
     def __len__(self):
         return len(self._functions)
@@ -946,10 +1014,10 @@ class Optimiser():
                 piezo_fit_results = piezo_fit.get_results()
                 if piezo_fit_results["converged"]:
                     # Piezo was successful.
-                    self._piezo_optimised = PiecewiseLinear(piezo_fit_results, piezo_breakpoints)
+                    self._piezo_optimised = PiecewiseLinear(piezo_fit_results, piezo_breakpoints, min_x=Optimiser.MIN_MIDI_NOTE, max_x=Optimiser.MAX_MIDI_NOTE)
 
                     # Check there isn't anything stupid happening with negatives or out of bounds
-                    clipped = self._piezo_optimised.clip(piezo_range.start, piezo_range.stop, Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE)
+                    clipped = self._piezo_optimised.clip(piezo_range.start, piezo_range.stop)
                     if clipped is not None:
                         base_msg = "When optimising the piezo data, at least 1 point was found outside the range [{}-{}] as set on the 'Run test / Serial' tab.".format(piezo_range.start, piezo_range.stop)
                         if len(clipped) > BikeHornInterface.MAX_POINTS:
@@ -977,9 +1045,9 @@ class Optimiser():
                 boost_fit_results = boost_fit.get_results()
                 if boost_fit_results["converged"]:
                     # Generate piecewise functions
-                    self._boost_optimised = PiecewiseLinear(boost_fit_results, boost_breakpoints)
+                    self._boost_optimised = PiecewiseLinear(boost_fit_results, boost_breakpoints, min_x=Optimiser.MIN_MIDI_NOTE, max_x=Optimiser.MAX_MIDI_NOTE)
                     # Check there isn't anything stupid happening with negatives or out of bounds
-                    clipped = self._boost_optimised.clip(boost_range.start, boost_range.stop, Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE)
+                    clipped = self._boost_optimised.clip(boost_range.start, boost_range.stop)
                     if clipped is not None:
                         base_msg = "When optimising the boost data, at least 1 point was found outside the range [{}-{}] as set on the 'Run test / Serial' tab.".format(boost_range.start, boost_range.stop)
                         if len(clipped) > BikeHornInterface.MAX_POINTS:
@@ -1020,10 +1088,10 @@ class Optimiser():
         return self._best_piezo_duty[index], self._best_boost_duty[index], self._best_loudness[index]
 
     def get_t1_optimised(self):
-        return self._piezo_optimised.transform(self._x_transform, self._t1_y_transform, Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE)
+        return self._piezo_optimised.transform(self._x_transform, self._t1_y_transform)
     
     def get_t2_optimised(self):
-        return self._boost_optimised.transform(self._x_transform, self._t2_y_transform, Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE)
+        return self._boost_optimised.transform(self._x_transform, self._t2_y_transform)
     
     def get_t1_optimised_as_linspace(self, length=100):
         x_orig = np.linspace(Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE, length)
@@ -1627,6 +1695,15 @@ Starting from EEPROM address {} using {} bytes:
         self._ax_piezo_best.clear()
         boost_x, boost_y = ([], [])
         piezo_x, piezo_y = ([], [])
+        legend_args = [] # In some cases, a custom legend is required
+
+        def plot_piecewise(axis, lines, **kwargs):
+            for x, y in lines:
+                axis.plot(x[0], y[0], "o", **kwargs) # First marker
+                axis.plot(x, y, **kwargs)
+                axis.plot(x[1], y[1], "o", mfc='w', **kwargs) # Last marker
+
+
 
         if self._optimiser_show_counters.get():
             # Show counters instead of %
@@ -1637,17 +1714,21 @@ Starting from EEPROM address {} using {} bytes:
             self._ax_piezo_best.set_xlabel("Piezo (timer 1) top")
             self._ax_piezo_best.set_ylabel("Timer 1 compare")
 
+            # Measured info
             t1_tops = self._optimiser.get_t1_tops()[:len(self._data_manager)]
             best_boost = self._optimiser.get_best_t2_compare()
             best_piezo = self._optimiser.get_best_t1_compare()
+            self._ax_boost_best.plot(t1_tops, best_boost, label="Measured", color="C0")
+            self._ax_piezo_best.plot(t1_tops, best_piezo, label="Measured", color="C0")
 
+            # Optimised optional info
             if self._optimiser.is_optimisation_valid():
                 min_x = self._bike_horn.midi_to_counter_top(Optimiser.MAX_MIDI_NOTE)
                 max_x = self._bike_horn.midi_to_counter_top(Optimiser.MIN_MIDI_NOTE)
-                boost_x, boost_y = self._optimiser.get_t2_optimised().as_coordinates(min_x, max_x)
-                piezo_x, piezo_y = self._optimiser.get_t1_optimised().as_coordinates(min_x, max_x)
-                self._ax_boost_best.plot(boost_x, boost_y, "o-", label="Optimised & simplified", color="C2")
-                self._ax_piezo_best.plot(piezo_x, piezo_y, "o-", label="Optimised & simplified", color="C2")
+                boost_lines = self._optimiser.get_t2_optimised().as_approximate_lines(min_x, max_x)
+                piezo_lines = self._optimiser.get_t1_optimised().as_approximate_lines(min_x, max_x)
+                plot_piecewise(self._ax_boost_best, boost_lines, label="Optimised & simplified", color="C2")
+                plot_piecewise(self._ax_piezo_best, piezo_lines, label="Optimised & simplified", color="C2")
 
                 # Non linear transform
                 boost_non_lin_x, boost_non_lin_y = self._optimiser.get_t2_optimised_as_linspace(500)
@@ -1655,9 +1736,8 @@ Starting from EEPROM address {} using {} bytes:
                 self._ax_boost_best.plot(boost_non_lin_x, boost_non_lin_y, ":", label="Optimised - Transformed from MIDI & % scales", color="C1")
                 self._ax_piezo_best.plot(piezo_non_lin_x, piezo_non_lin_y, ":", label="Optimised - Transformed from MIDI & % scales", color="C1")
 
-            self._ax_boost_best.plot(t1_tops, best_boost, label="Measured", color="C0")
-            self._ax_piezo_best.plot(t1_tops, best_piezo, label="Measured", color="C0")
-                
+                handles, labels = self._ax_boost_best.get_legend_handles_labels() # https://stackoverflow.com/a/33336415
+                legend_args = ([handles[0], handles[-1], handles[-2]], [labels[0], labels[-1], labels[-2]])
         else:
             # Show %
             self._ax_boost_best.set_title("Optimal boost duty cycle")
@@ -1670,17 +1750,17 @@ Starting from EEPROM address {} using {} bytes:
             best_boost = self._optimiser.get_best_boost()
             best_piezo = self._optimiser.get_best_piezo()
 
+            self._ax_boost_best.plot(midi, best_boost, label="Measured", color="C0")
+            self._ax_piezo_best.plot(midi, best_piezo, label="Measured", color="C0")
+
             if self._optimiser.is_optimisation_valid():
                 boost_x, boost_y = self._optimiser.get_boost_optimised().as_coordinates(Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE)
                 piezo_x, piezo_y = self._optimiser.get_piezo_optimised().as_coordinates(Optimiser.MIN_MIDI_NOTE, Optimiser.MAX_MIDI_NOTE)
                 self._ax_boost_best.plot(boost_x, boost_y, "o-", label="Optimised", color="C1")
                 self._ax_piezo_best.plot(piezo_x, piezo_y, "o-", label="Optimised", color="C1")
-            
-            self._ax_boost_best.plot(midi, best_boost, label="Measured", color="C0")
-            self._ax_piezo_best.plot(midi, best_piezo, label="Measured", color="C0")
 
-        self._ax_boost_best.legend()
-        self._ax_piezo_best.legend()
+        self._ax_boost_best.legend(*legend_args)
+        self._ax_piezo_best.legend(*legend_args)
 
         self._optimiser_fig.canvas.draw_idle()
 
@@ -1758,14 +1838,14 @@ Starting from EEPROM address {} using {} bytes:
                 self._ax_loudness.set_xlabel("Piezo Duty Cycle [%]")
                 self._ax_loudness.set_ylabel("Boost Duty Cycle [%]")
                 self._ax_loudness.set_zlabel("Loudness")
-                self._ax_loudness.plot_surface(piezo_mesh, boost_mesh, loudness, color="b")
+                self._ax_loudness.plot_surface(piezo_mesh, boost_mesh, loudness, color="C0")
                 best_piezo, best_boost, best_loudness = self._optimiser.chosen_coords(val)
-                best_path = self._ax_loudness.scatter([best_piezo], [best_boost], [best_loudness], marker="o", color="r")
+                best_path = self._ax_loudness.scatter([best_piezo], [best_boost], [best_loudness], marker="o", color="C1")
                 best_path.set_sizes([20])
                 self._ax_loudness.set_xlim3d(piezo_mesh[0,0], piezo_mesh[-1,-1])
                 self._ax_loudness.set_ylim3d(boost_mesh[0,0], boost_mesh[-1,-1])
-                custom_legend = [Patch(facecolor='blue', edgecolor='blue', label='Measured'),
-                                 Line2D([0], [0], marker='o', color='w', label='Best (Chosen)', markerfacecolor='r', markersize=8)]
+                custom_legend = [Patch(facecolor='C0', edgecolor='C0', label='Measured'),
+                                 Line2D([0], [0], marker='o', color='w', label='Best (Chosen)', markerfacecolor='C1', markersize=8)]
                 self._ax_loudness.legend(handles=custom_legend)
 
                 # Update
