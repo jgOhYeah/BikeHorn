@@ -4,26 +4,29 @@
  * 
  * Written by Jotham Gates
  * 
- * Last modified 27/12/2021
+ * Last modified 11/01/2022
  */
 
-#include "optimisations.h"
-
+/**
+ * @brief Handles the task of making the most noise possible.
+ * 
+ */
 class BikeHornSound : public TimerOneSound {
     public:
         void begin() {
             // Load and print configs
-            m_timer1Piecewise.begin(EEPROM_TIMER1_PIECEWISE);
-            m_timer2Piecewise.begin(EEPROM_TIMER2_PIECEWISE);
-
-            Serial.println(F("Timer 1 Optimisation settings:"));
-            m_timer1Piecewise.print();
-            Serial.println();
-            Serial.println(F("Timer 2 Optimisation settings:"));
-            m_timer2Piecewise.print();
+            if(m_timer1Piecewise.begin(EEPROM_TIMER1_PIECEWISE) && m_timer2Piecewise.begin(EEPROM_TIMER2_PIECEWISE)) {
+                Serial.println(F("Timer 1 Optimisation settings:"));
+                m_timer1Piecewise.print();
+                Serial.println();
+                Serial.println(F("Timer 2 Optimisation settings:"));
+                m_timer2Piecewise.print();
+            } else {
+                // There was an issue initialising the piecewise functions
+                Serial.println(F("ERROR: At least 1 piecewise function for optimising volume was a bit suspect and could not be loaded from EEPROM.\r\nAre you sure you have uploaded the optimised functions to EEPROM and the addresses are correct?\r\nSee https://github.com/jgOhYeah/BikeHorn/tree/main/Tuning for more info."));
+            }
         }
 
-        // TODO: Begin which initialises settings from eeprom
         /** Stops the sound and sets the boost pwm back to idle */
         void stopSound() {
             TIMSK1 = 0; // Disable the interrupt for changing the piezo frequency (warble mode).
@@ -108,7 +111,7 @@ class Warble {
          */
         void begin(BikeHornSound *newSoundGenerator, uint16_t newLower, uint16_t newUpper, uint32_t newRiseTime, uint32_t newFallTime) {
             soundGenerator = newSoundGenerator;
-            soundGenerator->begin();
+            // soundGenerator->begin();
 
             lower = newLower;
             upper = newUpper;

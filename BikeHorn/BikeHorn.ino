@@ -5,7 +5,7 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 27/12/2021
+ * Last modified 11/01/2022
  * 
  * Requires these libraries (can be installed through the library manager):
  *   - Low-Power (https://github.com/rocketscream/Low-Power) - Shuts things down to save power.
@@ -27,7 +27,6 @@
 // EEPROMWearLevel is only required if LOG_RUN_TIME is defined in defines.h
 #ifdef LOG_RUN_TIME
     #include <EEPROMWearLevel.h>
-    // TODO: Fix wear level to cope with settings also being stored in EEPROM
 #endif
 
 // Only needed for the watchdog timer (DO NOT enable for Arduinos with the old bootloader).
@@ -43,6 +42,7 @@
 #endif
 
 #include "tunes.h"
+#include "optimisations.h"
 #include "soundGeneration.h"
 
 FlashTuneLoader flashLoader;
@@ -85,7 +85,6 @@ void setup() {
 #endif
 
     // Tune Player
-    piezo.begin();
     flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
     tune.begin(&flashLoader, &piezo);
     tune.spool();

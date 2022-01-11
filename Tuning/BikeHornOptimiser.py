@@ -528,9 +528,10 @@ class BikeHornInterface():
 class LinearFunction():
     """Class for a linear function
     """
-    MAX_MULTIPLIER = 127
-    MAX_DENOMINATOR = 255
+    MAX_MULTIPLIER = 255 # Unsigned
+    MAX_DENOMINATOR = 2**15-1 # Signed
     MAX_CONSTANT = 2**31-1
+    BYTES_LENGTH = 6
 
     def __init__(self, gradient, x0, y0, target_min=None, target_max=None):
         """Creates a new linear function
@@ -566,7 +567,7 @@ class LinearFunction():
         """Returns bytes in the form multiplier, divisor, constant
         """
         numerator, denominator, constant = self._multiplier_as_fraction()
-        return numerator.to_bytes(1, "little", signed=True) + denominator.to_bytes(1, 'little', signed=False) + constant.to_bytes(4, 'little', signed=True)
+        return numerator.to_bytes(1, "little", signed=False) + denominator.to_bytes(2, 'little', signed=True) + constant.to_bytes(3, 'little', signed=True)
     
     def solve_for_x(self, y):
         """Solves the function for x at a given y value"""
@@ -599,6 +600,10 @@ class LinearFunction():
             focus_center = self._target_max
         distance = (numerator/denominator - self.m)*focus_center
         constant = round(self.c - distance)
+
+        if numerator < 0:
+            denominator = -denominator
+            numerator = -numerator
 
         return numerator, denominator, constant
 
@@ -705,14 +710,16 @@ class PiecewiseLinear():
     def to_bytes(self):
         """Generates a bytes object representing the piecewise function in the form
         [uint8_t length,
-         uint16_t threshold1, uint8_t multiplier1, int8_t divisor1, init32_t constant1,
+         uint16_t threshold1, uint8_t multiplier1, int16_t divisor1, init24_t constant1,
          ...,
-         uint16_t thresholdn, uint8_t multipliern, int8_t divisorn, init32_t constantn]
+         uint16_t thresholdn, uint8_t multipliern, int16_t divisorn, init24_t constantn]
         """
         result = len(self).to_bytes(1, 'little', signed=False)
         for function, threshold in self._functions:
             result += int(threshold).to_bytes(2, 'little', signed=False)
             result += function.to_bytes()
+
+        self._validate(result)
 
         return result
     
@@ -913,6 +920,19 @@ class PiecewiseLinear():
 
         return PiecewiseLinear(fit=None, n_breakpoints=None, x_coords=x_coords, y_coords=y_coords, min_x=min(x_coords), max_x=max(x_coords))
 
+    def _validate(self, data:bytes):
+        """Does a couple of sanity checks on the output bytes to make sure the bike horn will accept it"""
+        # Length check
+        length = data[0]
+        assert length > 0 and length <= BikeHornInterface.MAX_POINTS, "Length of {} is invalid".format(length)
+
+        # Strictly increasing thresholds check
+        previous = -math.inf
+        for i in range(1, ((LinearFunction.BYTES_LENGTH+2)*length), LinearFunction.BYTES_LENGTH+2):
+            current = int.from_bytes(data[i:i+2], 'little', signed=False)
+            assert current > previous, "Thresholds must be strictly increasing, Current ({}) <= Previous ({})".format(current, previous)
+            previous = current
+            
     def __len__(self):
         return len(self._functions)
 
@@ -1549,8 +1569,8 @@ class GUI():
         tk.Label(settings_frame, text="Piezo breakpoints:").grid(row=0, column=3, sticky=tk.E, padx=10, pady=10)
         Spinbox(settings_frame,  from_=1, to=10, textvariable=self._optimiser_piezo_breakpoints_text, width=10).grid(row=0, column=4, sticky=tk.W, padx=10, pady=10)
         self._optimise_button = tk.Button(settings_frame, text="Optimise", command=self._start_optimise)
-        self._optimise_button.grid(row=0, column=5, sticky=tk.E, padx=10, pady=10)
-        settings_frame.columnconfigure(tuple(range(6)), weight=1)
+        self._optimise_button.grid(row=0, column=5, sticky=tk.NSEW, padx=10, pady=10)
+        settings_frame.columnconfigure((1, 3, 5), weight=1)
         settings_frame.grid(sticky=tk.NSEW)
 
         # Create the Matplotlib toolbar

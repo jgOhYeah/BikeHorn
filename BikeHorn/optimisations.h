@@ -2,7 +2,7 @@
  * Configurations and tuning for individual horns.
  * 
  * Written by Jotham Gates.
- * Last modified 27/12/2021
+ * Last modified 11/01/2022
  */
 
 /**
@@ -20,15 +20,15 @@ class LinearFunction {
          * 
          * Parameters are encoded in EEPROM from address in little endian format. i.e.
          * @code {.c++}
-         * {[2 bytes for threshold], [2 bytes for the multiplier], [2 bytes for the divisor], [2 bytes for the constant]}
+         * {[2 bytes for threshold], [1 byte for the multiplier], [2 bytes for the divisor], [3 bytes for the constant]}
          * @endcode
          * 
          */
         void load(uint16_t address) {
-            m_threshold = m_readInt(address);
-            m_multiplier = m_readInt(address + 2);
-            m_divisor = m_readInt(address + 4);
-            m_constant = m_readInt(address + 6);
+            m_threshold = m_readInt16(address);
+            m_multiplier = EEPROM.read(address + 2);
+            m_divisor = m_readInt16(address + 3);
+            m_constant = m_readInt24(address + 5);
         }
 
         /**
@@ -38,7 +38,7 @@ class LinearFunction {
          * @return uint16_t the result
          */
         uint16_t apply(uint16_t input) {
-            return m_multiplier * input / m_divisor + m_constant;
+            return ((int32_t)m_multiplier * input) / m_divisor + m_constant;
         }
 
         /**
@@ -55,6 +55,7 @@ class LinearFunction {
             length += Serial.write(") + (");
             length += Serial.print(m_constant);
             length += Serial.write(")");
+            return length;
         }
         
         /**
@@ -84,13 +85,17 @@ class LinearFunction {
          * @param address the address of the first byte to read
          * @return int16_t the value at that address
          */
-        int16_t m_readInt(uint16_t address) {
+        int16_t m_readInt16(uint16_t address) {
             return EEPROM.read(address) | (EEPROM.read(address+1) << 8);
         }
-
+        int32_t m_readInt24(uint16_t address) {
+            return EEPROM.read(address) |
+                  (EEPROM.read(address+1) << 8) |
+                  (EEPROM.read(address+2) << 16);
+        }
         uint16_t m_threshold;
-        int16_t m_constant;
-        int16_t m_multiplier;
+        int32_t m_constant;
+        uint8_t m_multiplier;
         int16_t m_divisor;
 };
 
@@ -104,40 +109,6 @@ class LinearFunction {
  * {[1 byte for number of functions], [8 bytes for function 1], [8 bytes for function 2], ...}
  * @endcode
  * 
- * 
- * For example, the code:
- * @code {.c++}
- * uint16_t result;
- * uint16_t input;
- * if(input < 12) {
- *   result = 4/5*input + 7;
- * } elseif(input < 15) {
- *   result = 5*input - 5;
- * } else {
- *   result = 3/2*input;
- * }
- * @endcode
- * would be represented as:
- * @code {.c++}
- * {4, [length]
- *  [Function 1]
- *  12, 0, [threshold]
- *  4, 0, [multiplier]
- *  5, 0, [divisor]
- *  7, 0, [constant]
- *  [Function 2]
- *  15, 0, [threshold]
- *  5, 0, [multiplier]
- *  1, 0, [divisor]
- *  -5, 0, [constant, whatever this is as a 16 bit two's complement int]
- *  [Function 3]
- *  ##, ##, [threshold, ignored]
- *  3, 0, [multiplier]
- *  2, 0, [divisor]
- *  0, 0, [constant]
- * }
- * @endcode
- * 
  */
 class PiecewiseLinear {
     public:
@@ -145,16 +116,35 @@ class PiecewiseLinear {
          * @brief Initialises and loads the parameters from eeprom.
          * 
          * @param address the address of the first byte in eeprom.
+         * 
+         * @returns true if the length and data is reasonable, false otherwise (potentially bad data)
          */
-        void begin(uint16_t address) {
+        bool begin(uint16_t address) {
             // Load first address, this has the number of points and allocate ram for each point
             m_length = EEPROM.read(address);
-            m_functions = (LinearFunction *)malloc(m_length * sizeof(LinearFunction));
+            // Sanity checking
+            if(m_length != 0 && m_length <= EEPROM_PIECEWISE_MAX_LENGTH) {
+                m_functions = (LinearFunction *)malloc(m_length * sizeof(LinearFunction));
 
-            // For each address (sizeof), create a LinearFunction object and fill it out
-            for(uint16_t i = 0; i < m_length; i++) {
-                m_functions[i].load(i*LinearFunction::EEPROM_BYTES + address + 1);
+                // For each address (sizeof), create a LinearFunction object and fill it out
+                for(uint8_t i = 0; i < m_length; i++) {
+                    m_functions[i].load(i*LinearFunction::EEPROM_BYTES + address + 1);
+                }
+
+                // Check of the thresholds are strictly increasing as another sanity check
+                for(uint8_t i = 1; i < m_length; i++) {
+                    if(m_functions[i].getThreshold() <= m_functions[i-1].getThreshold()) {
+                        // Something is wrong with the thresholds.
+                        return false;
+                    }
+                }
+                // Successfully loaded with acceptable data
+                return true;
+            } else {
+                // Something is wrong with the length
+                return false;
             }
+            
         }
 
         /**
@@ -164,25 +154,27 @@ class PiecewiseLinear {
          * @return uint16_t f(x)
          */
         uint16_t apply(uint16_t input) {
-            // Linear search through linear functions to find correct one to apply (the last one where the threshold is greater than the input)
-            // Threshold of last is ignored as it is assumed it is the else clause
-            uint8_t i = 0;
-            for(; i < m_length; i++) {
-                if(!m_functions[i].underThreshold(input) | i == m_length-1) {
-                    // Return previous (or else if the last one)
-                    if(i!=0) {
-                        // Return i-1
-                        i--;
-                    } else {
-                        // Return the else
-                        i = m_length - 1;
+            // Linear search through linear functions to find correct one to apply (the last one where the threshold is greater >= the input)
+            // See the apply method in BikeHornOptimiser.py
+            // Catch not being initialised properly
+            if(m_length) {
+                // Apply as normal
+                uint8_t i = 1;
+                for(; i < m_length; i++) {
+                    if(m_functions[i].underThreshold(input)) {
+                        // Return previous (or else if the last one)
+                        // Serial.print(F(". Choosing "));
+                        // Serial.println(i-1);
+                        return m_functions[i-1].apply(input);
                     }
-                    break;
                 }
-            }
 
-            // Call apply of function and return
-            return m_functions[i].apply(input);
+                // Serial.println(F(". Choosing last function"));
+                return m_functions[m_length-1].apply(input);
+            } else {
+                // Return 0 as not initialised
+                return 0;
+            }
         }
 
         /**
@@ -190,7 +182,6 @@ class PiecewiseLinear {
          * 
          */
         void print() {
-            uint16_t previousThreshold = 0;
             for(uint8_t i = 0; i < m_length; i++) {
                 // Piecewise brackets
                 if(i!=0) {
@@ -206,12 +197,12 @@ class PiecewiseLinear {
 
                 // Range at end
                 Serial.write(", ");
-                Serial.print(previousThreshold);
-                Serial.write(" <= x <= ");
+                Serial.print(m_functions[i].getThreshold());
+                Serial.write(" <= x < ");
                 if(i != m_length-1) { // Cope with the last one being an else
-                    Serial.print(m_functions[i].getThreshold());
+                    Serial.print(m_functions[i+1].getThreshold());
                 } else {
-                    Serial.println(65535);
+                    Serial.println("Inf.");
                 }
                 Serial.println();
             }
@@ -235,5 +226,5 @@ class PiecewiseLinear {
             }
         }
         LinearFunction *m_functions;
-        uint8_t m_length;
+        uint8_t m_length = 0;
 };
