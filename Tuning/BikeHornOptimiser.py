@@ -37,9 +37,13 @@ from enum import Enum, auto
 # TODO: Load / save a default settings file automatically (not necessary, but might be convenient)
 # TODO: Standard deviation / different from those around a data point as a measure of uncertainty when fitting to avoid noise / didgy data
 # TODO: Cope with someone trying to test, optimise and upload at the same time
+# TODO: Test warble / sweep
+# TODO: Not always clipping on start
+# TODO: Measure voltage as well
+# TODO: Semi - Random / non sequential order of testing
 
 name = "Bike Horn Optimiser Tool"
-version = "0.9.0"
+version = "1.0.0"
 
 # For python 3.6 (https://stackoverflow.com/a/52440947)
 class Spinbox(ttk.Entry):
@@ -255,8 +259,9 @@ class BikeHornInterface():
     EEPROM_TIMER1_PIECEWISE = 0x35e
     EEPROM_TIMER2_PIECEWISE = EEPROM_TIMER1_PIECEWISE + EEPROM_PIECEWISE_SIZE
     MAX_POINTS = 10
-    
 
+    TEST_WAIT_TIME = 0.2
+    
     def __init__(self, logging, data_manager, audio=None, gui=None):
         self._serial_port = serial.Serial()
         self._logging = logging
@@ -302,7 +307,8 @@ class BikeHornInterface():
         if not self._abort:
             # Progress bar
             total_steps = len(piezo_duty_values) * len(boost_duty_values) * len(midi_values)
-            self._logging.info("Running the test (when it is implemented) with {} points to test".format(total_steps))
+            total_time = total_steps*BikeHornInterface.TEST_WAIT_TIME + len(midi_values)*cooldown_time
+            self._logging.info("Running the test with {} points to test. This will take around {:.1f} minutes".format(total_steps, total_time/60))
             current_step = 0
 
             for midi in midi_values:
@@ -461,7 +467,7 @@ class BikeHornInterface():
                 self.abort_test()
                 return 0
             
-            time.sleep(0.2) # A short while to let things stabilise
+            time.sleep(BikeHornInterface.TEST_WAIT_TIME) # A short while to let things stabilise
             return self._audio.get_level()
         else:
             self._logging.error("Lost connection to horn - serial port closed unexpectedly")
