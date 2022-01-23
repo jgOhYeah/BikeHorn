@@ -124,6 +124,10 @@ class DataManager():
         self._logging.info("Writing {}{}".format(filename, extra_log_info))
         np.savez_compressed(filename, sound_data=self._sound_data, settings=self._settings, metadata=self._metadata)
     
+    def save_optimisations(self, piezo, boost):
+        # TODO
+        pass
+
     def open(self, filename):
         self._logging.info("Opening {}".format(filename))
         # Load the file
@@ -833,7 +837,7 @@ class PiecewiseLinear():
                 # Always above, do not add anything
                 clipping = True
             elif y_min <= previous <= y_max and y_min <= current <= y_max:
-                # Always in, add previous (only case of not clipping)
+                # Always in, add previous (only case of not clipping in this series of cases)
                 new_x.append(x_coords[i-1])
                 new_y.append(previous)
             elif previous < y_min and current < y_min:
@@ -881,6 +885,7 @@ class PiecewiseLinear():
                 new_y.append(y_max)
             elif previous < y_min and y_min <= current <= y_max:
                 # Below going in, add crossover
+                clipping = True
                 crossover = cur_func.solve_for_x(y_min)
                 new_x.append(crossover)
                 new_y.append(y_min)
@@ -890,7 +895,7 @@ class PiecewiseLinear():
         new_y.append(max(min(self._functions[-1][0].apply(x_coords[-1]), y_max), y_min))
 
         if clipping:
-            return PiecewiseLinear(None, None, new_x, new_y, min_x=self._min_x, max_x=self._max_x)
+            return PiecewiseLinear(None, None, new_x, new_y, min_x=x_min, max_x=x_max)
         else:
             return None
 
@@ -1048,7 +1053,7 @@ class Optimiser():
                         base_msg = "When optimising the piezo data, at least 1 point was found outside the range [{}-{}] as set on the 'Run test / Serial' tab.".format(piezo_range.start, piezo_range.stop)
                         if len(clipped) > BikeHornInterface.MAX_POINTS:
                             self._piezo_optimisation_valid = None
-                            self._logging.error("{} This application attempted to add new lines to clip the function to this range, however there are now >{} the allowed points. See the 'Help / About' tab for more info.".format(base_msg, BikeHornInterface.MAX_POINTS))
+                            self._logging.error("{} This application attempted to add new lines to clip the function to this range, however this resulted in more than the {} allowed linear functions. Try changing the number of breakpoints. See the 'Help / About' tab for more info.".format(base_msg, BikeHornInterface.MAX_POINTS))
                             return
                         else:
                             self._logging.warning("{} Extra lines have been added to limit the function to this range.".format(base_msg))
@@ -1172,17 +1177,23 @@ class Optimiser():
     def _x_transform(self, x, _):
         return self._bike_horn.midi_to_counter_top(x)
     
-    def _t1_y_transform(self, x, y):
-        return self._bike_horn.duty_to_counter_compare(y, self._bike_horn.midi_to_counter_top(x))
+    def _t1_y_transform(self, x_midi, y_percent):
+        t1_top = self._bike_horn.midi_to_counter_top(x_midi)
+        t1_compare = self._bike_horn.duty_to_counter_compare(y_percent, t1_top)
+        assert 0 <= t1_compare <= t1_top, "Invalid timer 1 compare value after transform"
+        return t1_compare
     
-    def _t2_y_transform(self, x, y):
-        return self._bike_horn.duty_to_counter_compare(y, BikeHornInterface.TIMER_2_TOP)
+    def _t2_y_transform(self, _, y_percent):
+        t2_compare = self._bike_horn.duty_to_counter_compare(y_percent, BikeHornInterface.TIMER_2_TOP)
+        assert 0 <= t2_compare <= BikeHornInterface.TIMER_2_TOP, "Invalid timer 2 compare value after transform"
+        return t2_compare
 
 class GUI():
     ICON = 'icon.png'
     def __init__(self, logging, bike_horn:BikeHornInterface, data_manager:DataManager, optimiser:Optimiser):
         """Creates and runs the GUI
         """
+        self._dialogue_lock = threading.Lock()
         self._logging = logging
         self._bike_horn = bike_horn
         self._data_manager = data_manager
@@ -1277,7 +1288,9 @@ class GUI():
     def _confirm_run_test(self):
         """Asks whether to run the test as any unsaved results and settings will be lost
         """
+        self._dialogue_lock.acquire()
         result = tkmb.askyesno("Confirm run test", "Are you sure you want to run a NEW test? Any previous, unsaved results will be lost.")
+        self._dialogue_lock.release()
         if result:
             try:
                 # +1 as people would expect top value to be included
@@ -1298,7 +1311,9 @@ class GUI():
     
     def _confirm_abort_test(self):
         """Confirms the user is sure they want to abort the test"""
+        self._dialogue_lock.acquire()
         result = tkmb.askokcancel("Abort the test", "Are you sure you can to abort the test? Any results up until the current note can be saved later")
+        self._dialogue_lock.release()
         if result:
             self._bike_horn.abort_test()
     
@@ -1317,13 +1332,19 @@ class GUI():
         self._test_progress['value'] = value
     
     def info_dialog(self, msg=""):
+        self._dialogue_lock.acquire()
         tkmb.showinfo("Info", msg)
+        self._dialogue_lock.release()
 
     def warning_dialog(self, msg=""):
+        self._dialogue_lock.acquire()
         tkmb.showwarning("Warning", msg)
+        self._dialogue_lock.release()
     
     def error_dialog(self, msg=""):
+        self._dialogue_lock.acquire()
         tkmb.showerror("Error", msg)
+        self._dialogue_lock.release()
 
     def add_monitor_text(self, msg="", end="\n", tag=None):
         fully_scrolled_down = self._text_messages.yview()[1] == 1.0 # Scrolling based off https://stackoverflow.com/a/51781603
@@ -1484,11 +1505,13 @@ class GUI():
         midi_inc_spinbox = Spinbox(tab,  from_=0, to=127, textvariable=self._midi_inc_text, width=5)
         midi_inc_spinbox.grid(row=3, column=5, padx=10, pady=10, sticky=tk.W)
 
-        # Cooldown
-        ttk.Label(tab, text="Cooldown time between notes (s):").grid(row=4, padx=10, pady=10, sticky=tk.E, columnspan=2)
+        # Cooldown, randomise and passes
+        ttk.Label(tab, text="Cooldown time between notes (s):").grid(column=0, row=4, padx=10, pady=10, sticky=tk.E, columnspan=2)
         self._cooldown_text = tk.StringVar(value=10)
         cooldown_spinbox = Spinbox(tab,  from_=0, to=60, textvariable=self._cooldown_text, width=5)
         cooldown_spinbox.grid(row=4, column=2, padx=10, pady=10, sticky=tk.W)
+        # TODO
+        # tk.Checkbutton(tab, text="Randomise test order").grid(row=4, column=3, padx=10, pady=10, sticky=tk.E)
 
         # Run test and progress bar
         self._test_control_button = ttk.Button(tab, text="Start test", command=self._confirm_run_test)
@@ -1633,7 +1656,9 @@ as expected.""").grid(padx=10, pady=10, sticky=tk.W)
         def confirm_upload():
             """Confirms with the user whether to upload the data
             """
+            self._dialogue_lock.acquire()
             result = tkmb.askyesno("Confirm upload", "Are you sure you want to upload the current optimised settings? Any existing settings on the horn will be lost.")
+            self._dialogue_lock.release()
             if result:
                 self._bike_horn.set_serial_port(self._serial_port.get())
                 upload_thread = threading.Thread(target=run_upload, daemon=True)
@@ -1896,7 +1921,9 @@ Starting from EEPROM address {} using {} bytes:
             self._logging.info("Cancelled saving file")
     
     def _select_open_file(self):
+        self._dialogue_lock.acquire()
         result = tkmb.askyesno("Open an existing file", "Are you sure you want to open an existing file? Any unsaved data will be lost.")
+        self._dialogue_lock.release()
         if result:
             filename = fd.askopenfilename(defaultextension="npz", initialfile=self._data_manager.get_filename())
             if type(filename) == str and filename != "":
@@ -1908,7 +1935,10 @@ Starting from EEPROM address {} using {} bytes:
             self._logging.info("Cancelled opening file")
 
     def _wipe_eeprom(self):
-        if tkmb.askyesno("Confirm erase EEPROM contents", "Are you sure you want to reset everything in EEPROM to 0xff (255)? This will also delete any settings or usage statistics currently stored, as well as configurations. This is mainly intended for debugging purposes only."):
+        self._dialogue_lock.acquire()
+        result = tkmb.askyesno("Confirm erase EEPROM contents", "Are you sure you want to reset everything in EEPROM to 0xff (255)? This will also delete any settings or usage statistics currently stored, as well as configurations. This is mainly intended for debugging purposes only.")
+        self._dialogue_lock.release()
+        if result:
             self._bike_horn.set_serial_port(self._serial_port.get())
             self._bike_horn.wipe_eeprom()
             self._logging.info("Done")
@@ -1977,17 +2007,17 @@ class AudioLevels():
         if self._gui:
             self._gui.set_sound_level(self._audio_level)
 
-if __name__ == "__main__":
-    logging = Logging()
-    data_manager = DataManager(logging)
-    bike_horn = BikeHornInterface(logging, data_manager)
-    optimiser = Optimiser(logging, data_manager, bike_horn)
-    gui = GUI(logging, bike_horn, data_manager, optimiser)
-    optimiser.set_gui(gui)
-    bike_horn.set_gui(gui)
-    audio = AudioLevels(gui)
-    bike_horn.set_audio(audio)
-    logging.set_gui(gui)
-    gui.draw()
-    audio.start()
-    gui.run()
+# if __name__ == "__main__":
+logging = Logging()
+data_manager = DataManager(logging)
+bike_horn = BikeHornInterface(logging, data_manager)
+optimiser = Optimiser(logging, data_manager, bike_horn)
+gui = GUI(logging, bike_horn, data_manager, optimiser)
+optimiser.set_gui(gui)
+bike_horn.set_gui(gui)
+audio = AudioLevels(gui)
+bike_horn.set_audio(audio)
+logging.set_gui(gui)
+gui.draw()
+audio.start()
+gui.run()
