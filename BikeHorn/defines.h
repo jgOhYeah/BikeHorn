@@ -37,8 +37,10 @@
                       // existing HPV horns)
 #define WARBLE_LOWER 3000 // Lower frequency (Hz)
 #define WARBLE_UPPER 3800 // Upper frequency (Hz)
-#define WARBLE_RISE 10000 // Up chirp time (ms)
-#define WARBLE_FALL 40000 // Down chirp time (ms)
+#define WARBLE_RISE 15000 // Up chirp time (ms)
+#define WARBLE_FALL 50000 // Down chirp time (ms)
+#define WARBLE_STEP 10 // Number of timer 1 counts to step at a time (need to keep time between steps high enough to not
+                       // get bogged down as each update now takes ~100us with eeprom piecewise)
 
 /**
  * @brief Logging and EEPROM settings

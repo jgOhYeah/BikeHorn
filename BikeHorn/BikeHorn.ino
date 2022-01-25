@@ -74,7 +74,7 @@ void setup() {
 
     // Logging (optional)
 #ifdef LOG_RUN_TIME
-    EEPROMwl.begin(LOG_VERSION, 2);
+    EEPROMwl.begin(LOG_VERSION, 2, EEPROM_WEAR_LEVEL_LENGTH);
     Serial.print(F("Run time logging enabled. Horn has been sounding for "));
     Serial.print(getTime() / 1000);
     Serial.println(F(" seconds."));

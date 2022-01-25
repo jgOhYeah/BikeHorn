@@ -110,43 +110,43 @@ class Warble {
          * Initialises the library with the given parameters
          */
         void begin(BikeHornSound *newSoundGenerator, uint16_t newLower, uint16_t newUpper, uint32_t newRiseTime, uint32_t newFallTime) {
-            soundGenerator = newSoundGenerator;
-            // soundGenerator->begin();
+            m_soundGenerator = newSoundGenerator;
+            // m_soundGenerator->begin();
 
-            lower = newLower;
-            upper = newUpper;
-            riseTime = newRiseTime;
-            fallTime = newFallTime;
+            m_lower = newLower;
+            m_upper = newUpper;
+            m_riseTime = newRiseTime;
+            m_fallTime = newFallTime;
         }
 
         /**
          * Updates the chirp as required
          */
         void update() {
-            if(isActive) {
+            if(m_isActive) {
                 uint32_t time = micros();
-                if(time - lastUpdate > updateInterval) {
-                    lastUpdate = time;
-                    if(isRising) {
-                        if(frequency != upper) {
+                if(time - m_lastUpdate > m_updateInterval) {
+                    m_lastUpdate = time;
+                    if(m_isRising) {
+                        if(m_frequency != m_upper) {
                             // Keep going up
-                            frequency++;
+                            m_frequency+=WARBLE_STEP;
                         } else {
                             // Swap to falling
-                            isRising = false;
-                            updateInterval = timeStep(fallTime);
+                            m_isRising = false;
+                            m_updateInterval = m_timeStep(m_fallTime);
                         }
                     } else {
-                        if(frequency != lower) {
+                        if(m_frequency != m_lower) {
                             // Keep going down
-                            frequency--;
+                            m_frequency-=WARBLE_STEP;
                         } else {
                             // Swap to rising
-                            isRising = true;
-                            updateInterval = timeStep(riseTime);
+                            m_isRising = true;
+                            m_updateInterval = m_timeStep(m_riseTime);
                         }
                     }
-                    soundGenerator->changeFreq(frequency);
+                    m_soundGenerator->changeFreq(m_frequency);
                 }
             }
         }
@@ -155,31 +155,31 @@ class Warble {
          * Starts the chirp
          */
         void start() {
-            isRising = false;
-            lastUpdate = micros();
-            frequency = upper;
-            isActive = true;
-            updateInterval = timeStep(fallTime);
-            soundGenerator->playFreq(frequency);
+            m_isRising = false;
+            m_lastUpdate = micros();
+            m_frequency = m_upper;
+            m_isActive = true;
+            m_updateInterval = m_timeStep(m_fallTime);
+            m_soundGenerator->playFreq(m_frequency);
         }
 
         /**
          * Stops all sound
          */
         void stop() {
-            soundGenerator->stopSound();
-            isActive = false;
+            m_soundGenerator->stopSound();
+            m_isActive = false;
         }
 
     private:
-        BikeHornSound *soundGenerator;
-        uint16_t lower, upper, frequency;
-        bool isRising;
-        bool isActive = false;
-        uint32_t lastUpdate, updateInterval, riseTime, fallTime;
+        BikeHornSound *m_soundGenerator;
+        uint16_t m_lower, m_upper, m_frequency;
+        bool m_isRising;
+        bool m_isActive = false;
+        uint32_t m_lastUpdate, m_updateInterval, m_riseTime, m_fallTime;
 
-        uint32_t timeStep(uint32_t sweepTime) {
-            return sweepTime / (upper - lower);
+        uint32_t m_timeStep(uint32_t sweepTime) {
+            return WARBLE_STEP * sweepTime / (m_upper - m_lower);
         }
 
 };

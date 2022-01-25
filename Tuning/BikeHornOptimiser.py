@@ -38,9 +38,9 @@ from enum import Enum, auto
 # TODO: Standard deviation / different from those around a data point as a measure of uncertainty when fitting to avoid noise / didgy data
 # TODO: Cope with someone trying to test, optimise and upload at the same time
 # TODO: Test warble / sweep
-# TODO: Not always clipping on start
 # TODO: Measure voltage as well
 # TODO: Semi - Random / non sequential order of testing
+# TODO: Cope with backing up actual filenames
 
 name = "Bike Horn Optimiser Tool"
 version = "1.0.0"
@@ -117,7 +117,7 @@ class DataManager():
         filename = self.get_filename()
         extra_log_info = ""
         if backup:
-            filename = ".BACKUP_{}".format(filename)
+            filename = "{}_BACKUP".format(filename)
             extra_log_info = " (as a backup)"
 
         self._generate_metadata(backup)
@@ -306,7 +306,7 @@ class BikeHornInterface():
         sound_data = []
         
         if not self._start_serial_port():
-            self.abort_test()
+            self.abort()
 
         if not self._abort:
             # Progress bar
@@ -349,8 +349,8 @@ class BikeHornInterface():
                 time.sleep(cooldown_time)
 
             # Finished the test successfully
-            self._shutdown()
-            self._logging.info("Finished the test successfully", True)
+            self._logging.info("Finished the test successfully")
+            self._shutdown(success=True)
         else:
             self._shutdown(False)
 
@@ -365,7 +365,7 @@ class BikeHornInterface():
             self._logging.info("Closing the serial port")
             self._serial_port.close()
     
-    def abort_test(self):
+    def abort(self):
         """Sets the flag to stop testing
         """
         self._abort = True
@@ -420,6 +420,69 @@ class BikeHornInterface():
         
         self._logging.info("Sending '0xff'*{} to EEPROM".format(BikeHornInterface.EEPROM_SIZE))
         self._send_config(0, data)
+    
+    def preview_notes(self, notes:Iterable, duration:int, boost_duty:int=None, piezo_duty:int=None, optimiser=None) -> None:
+        """Makes noises with the given settings as a preview
+
+        Args:
+            notes (Iterable): The midi notes to play
+            duration (int): The duration to play for in ms
+            boost_duty (int, optional): The duty cycle of the boost stage as a percentage. If set to
+                                        None, uses the currently optimised settings. Defaults to 
+                                        None.
+            piezo_duty (int, optional): The duty cycle of the piezo stage as a percentage. If set to
+                                        None, uses the currently optimised settings. Defaults to 
+                                        None.
+            optimiser (Optimiser, optional): The optimisations to use if boost_duty or piezo_duty are
+                                             None. This does not need to be provided if both are not
+                                             None.
+        """
+        # Find or make functions for the boost and piezo compare values
+        assert optimiser is not None or (boost_duty is None and piezo_duty is None), "optimiser needs to be set if boost_duty or  piezo_duty is none"
+        if boost_duty is None:
+            boost_func = optimiser.get_t2_optimised().approximate
+        else:
+            boost_func = lambda _: self.duty_to_counter_compare(boost_duty, BikeHornInterface.TIMER_2_TOP)
+        
+        if piezo_duty is None:
+            piezo_func = optimiser.get_t1_optimised().approximate
+        else:
+            piezo_func = lambda t1_top: self.duty_to_counter_compare(piezo_duty, t1_top)
+        
+        # Start serial
+        self._abort = False
+        if not self._start_serial_port():
+            self.abort()
+            
+        
+        # Play notes
+        for i in notes:
+            self._logging.info("Playing midi note {} for {}ms".format(i, duration))
+            if self._serial_port.isOpen():
+                # Write to serial port
+                t1_top = self.midi_to_counter_top(i)
+                t1_compare = piezo_func(t1_top)
+                t2_compare = boost_func(t1_top)
+                self._serial_port.write("~`~`p{}~{}~{}`~`~".format(t1_top, t1_compare, t2_compare).encode('UTF-8'))
+                
+                # Wait for acknowledge
+                response = self._serial_port.read_until("`~`~".encode('UTF-8'))
+                if "~`~`Ack`~`~" not in str(response):
+                    self._logging.error("Lost connection to horn - no acknowledge received")
+                    self.abort()
+            else:
+                self._logging.error("Lost connection to horn - serial port closed unexpectedly")
+                self.abort()
+            
+            time.sleep(duration/1000)
+
+            if self._abort:
+                self._logging.info("Stopping playing notes")
+                self._shutdown(False)
+                return
+
+        self._logging.info("Done playing notes")
+        self._shutdown(True)
 
     def _send_config(self, address, config):
         self._logging.info("Address: {}, Config: {}".format(address, config))
@@ -454,6 +517,8 @@ class BikeHornInterface():
         else:
             self._logging.error("Lost connection to horn - serial port closed unexpectedly")
             return False
+
+        self._logging.info("") # New line for dots
         return True
 
     def _get_data_point(self, midi, boost, piezo):
@@ -468,14 +533,14 @@ class BikeHornInterface():
             response = self._serial_port.read_until("`~`~".encode('UTF-8'))
             if "~`~`Ack`~`~" not in str(response):
                 self._logging.error("Lost connection to horn - no acknowledge received")
-                self.abort_test()
+                self.abort()
                 return 0
             
             time.sleep(BikeHornInterface.TEST_WAIT_TIME) # A short while to let things stabilise
             return self._audio.get_level()
         else:
             self._logging.error("Lost connection to horn - serial port closed unexpectedly")
-            self.abort_test()
+            self.abort()
 
 
     def _start_serial_port(self):
@@ -514,10 +579,10 @@ class BikeHornInterface():
                 response = self._serial_port.read_until("`~`~".encode('UTF-8'))
                 if "~`~`Ack`~`~" not in str(response):
                     self._logging.error("Lost connection to horn - no acknowledge received")
-                    self.abort_test()
+                    self.abort()
         elif require_response:
             self._logging.error("Lost connection to horn - serial port closed unexpectedly")
-            self.abort_test()
+            self.abort()
 
     def _shutdown(self, success=True):
         """Attempts to make the horn go quiet"""
@@ -926,8 +991,10 @@ class PiecewiseLinear():
         x_coords = []
         y_coords = []
         for i in range(len(x)):
-            x_coords.append(x_transform(x[i], y[i]))
-            y_coords.append(y_transform(x[i], y[i]))
+            new_x = x_transform(x[i], y[i])
+            if new_x not in x_coords: # Make sure we don't have duplicate x values that cause division by 0 further on
+                x_coords.append(new_x)
+                y_coords.append(y_transform(x[i], y[i]))
 
         return PiecewiseLinear(fit=None, n_breakpoints=None, x_coords=x_coords, y_coords=y_coords, min_x=min(x_coords), max_x=max(x_coords))
 
@@ -1190,6 +1257,9 @@ class Optimiser():
 
 class GUI():
     ICON = 'icon.png'
+    HEADING = ("", 15, "bold")
+    SUBHEADING = ("", 12, "bold")
+
     def __init__(self, logging, bike_horn:BikeHornInterface, data_manager:DataManager, optimiser:Optimiser):
         """Creates and runs the GUI
         """
@@ -1315,7 +1385,7 @@ class GUI():
         result = tkmb.askokcancel("Abort the test", "Are you sure you can to abort the test? Any results up until the current note can be saved later")
         self._dialogue_lock.release()
         if result:
-            self._bike_horn.abort_test()
+            self._bike_horn.abort()
     
     def test_finished(self, success):
         self._test_control_button['text'] = "Start Test"
@@ -1614,7 +1684,7 @@ class GUI():
         self._optimiser.register_call_on_optimise_sucess(self._plot_optimisation)
 
     def _draw_help_tab(self, tab):
-        ttk.Label(tab, text="{} version {}".format(name, version), font=("", 15, "bold")).grid(padx=10, pady=(10, 0), sticky=tk.W)
+        ttk.Label(tab, text="{} version {}".format(name, version), font=GUI.HEADING).grid(padx=10, pady=(10, 0), sticky=tk.W)
         ttk.Label(tab, text=
 """By Jotham Gates
 This is still a work in progress. For more info, go to:""").grid(padx=10, pady=(10, 0), sticky=tk.W)
@@ -1623,14 +1693,14 @@ This is still a work in progress. For more info, go to:""").grid(padx=10, pady=(
         github_link = ttk.Label(tab, text=github, cursor="hand2", foreground="blue")
         github_link.grid(padx=10, pady=(0, 10), sticky=tk.W)
         github_link.bind("<Button-1>", lambda e: webbrowser.open_new_tab(github))
-        ttk.Label(tab, text="Main Steps:", font=("", 12, "bold")).grid(padx=10, pady=10, sticky=tk.W)
+        ttk.Label(tab, text="Main Steps:", font=GUI.SUBHEADING).grid(padx=10, pady=10, sticky=tk.W)
         ttk.Label(tab, text=
 """1. Upload the optimising sketch to the horn.
 2. Run or open a test.
 3. Adjust settings for and optimise the data in the 'Optimisation settings' tab.
 4. Upload the optimised settings to the horn.
 5. Upload the main bike horn sketch to put the horn back in power saving mode.""").grid(padx=10, pady=10, sticky=tk.W)
-        ttk.Label(tab, text="Why the limit of 10 lines (9 breakpoints) per parameter to optimise?", font=("", 12, "bold")).grid(padx=10, pady=10, sticky=tk.W)
+        ttk.Label(tab, text="Why the limit of 10 lines (9 breakpoints) per parameter to optimise?", font=GUI.SUBHEADING).grid(padx=10, pady=10, sticky=tk.W)
         ttk.Label(tab, text=
 """The processed optimisations are stored in EEPROM memory in the Arduino microcontroller on the horn.
 This is limited to 1024 bytes on an Arduino Nano. Each linear function takes up 8 bytes. Because
@@ -1650,8 +1720,10 @@ as expected.""").grid(padx=10, pady=10, sticky=tk.W)
     def _draw_upload_tab(self, tab):
         def run_upload():
             self._upload_button["state"] = tk.DISABLED
+            self._preview_button["state"] = tk.DISABLED
             self._bike_horn.upload(self._optimiser)
             self._upload_button["state"] = tk.NORMAL
+            self._preview_button["state"] = tk.NORMAL
 
         def confirm_upload():
             """Confirms with the user whether to upload the data
@@ -1675,8 +1747,11 @@ as expected.""").grid(padx=10, pady=10, sticky=tk.W)
         frame.grid(row=5, sticky=tk.NSEW, padx=10, pady=(0, 10))
 
         # Upload button
+        self._preview_button = ttk.Button(tab, text="Preview current optimisations on horn", command=self._preview)
+        self._preview_button.grid(row=7, column=0, padx=10, pady=(10, 0), sticky=tk.NSEW)
+        self._preview_button["state"] = tk.DISABLED
         self._upload_button = ttk.Button(tab, text="Upload to horn (set the serial port in the 'Run test / Serial' tab)", command=confirm_upload)
-        self._upload_button.grid(row=7, column=0, padx=10, pady=10, sticky=tk.NSEW)
+        self._upload_button.grid(row=8, column=0, padx=10, pady=10, sticky=tk.NSEW)
         self._upload_button["state"] = tk.DISABLED
 
         self._draw_optimised_formulas()
@@ -1819,9 +1894,11 @@ Starting from EEPROM address {} using {} bytes:
         if self._has_port and self._optimiser.is_optimisation_valid():
             # We can upload data
             self._upload_button["state"] = tk.NORMAL
+            self._preview_button["state"] = tk.NORMAL
         else:
             # Cannot upload data
             self._upload_button["state"] = tk.DISABLED
+            self._preview_button["state"] = tk.DISABLED
 
     def _plot_results_scroll(self, instruction=None, amount=None, units=None):
         max_index = len(self._data_manager.get_sound_data())-1
@@ -1958,6 +2035,137 @@ Starting from EEPROM address {} using {} bytes:
         message = self._bike_horn.dump_eeprom()
         self._replace_text_contents(text, message)
 
+    def _preview(self):
+        window = tk.Toplevel(self._root)
+        window.title("Preview optimised settings")
+        boost_mode = tk.StringVar()
+        piezo_mode = tk.StringVar()
+        fixed_boost_duty = tk.StringVar(value=50)
+        fixed_piezo_duty = tk.StringVar(value=50)
+
+        str_optimised = "Optimised Settings"
+        str_fixed = "Fixed Duty Cycle"
+        str_off = "Off (0% duty)"
+
+        def set_boost_spinbox_state(_=None):
+            if boost_mode.get() == "Fixed Duty Cycle":
+                fixed_boost_spinbox["state"] = tk.NORMAL
+            else:
+                fixed_boost_spinbox["state"] = tk.DISABLED
+        
+        def set_piezo_spinbox_state(_=None):
+            if piezo_mode.get() == str_fixed:
+                fixed_piezo_spinbox["state"] = tk.NORMAL
+            else:
+                fixed_piezo_spinbox["state"] = tk.DISABLED
+        
+        def get_modes():
+            # Boost
+            boost_mode_str = boost_mode.get()
+            if boost_mode_str == str_optimised:
+                boost = None
+            elif boost_mode_str == str_fixed:
+                boost = int(fixed_boost_duty.get())
+            else:
+                boost = 0
+            
+            # Piezo
+            piezo_mode_str = piezo_mode.get()
+            if piezo_mode_str == str_optimised:
+                piezo = None
+            else:
+                piezo = int(fixed_piezo_duty.get())
+            
+            return piezo, boost
+
+        def common_play_notes(notes, length, boost, piezo):
+            """Does the starting of threads and greying out buttons"""
+            def run():
+                single_button["state"] = tk.DISABLED
+                sweep_button["state"] = tk.DISABLED
+                self._bike_horn.preview_notes(notes, length, boost, piezo, self._optimiser)
+                single_button["state"] = tk.NORMAL
+                sweep_button["state"] = tk.NORMAL
+            
+            thread = threading.Thread(target=run, daemon=True)
+            thread.start()
+
+
+        def play_note():
+            self._save_settings()
+            self._bike_horn.set_serial_port(self._serial_port.get())
+            try:
+                note = int(midi_single_note.get())
+                length = int(duration.get())
+                piezo, boost = get_modes()
+            except ValueError:
+                self._logging.error("Error reading parameters to play a single note")
+            else:
+                common_play_notes((note, ), length, boost, piezo)
+        
+        def play_sweep():
+            self._save_settings()
+            self._bike_horn.set_serial_port(self._serial_port.get())
+            try:
+                notes = range(int(midi_note_min.get()), int(midi_note_max.get())+1, int(midi_note_step.get()))
+                length = int(duration.get())
+                piezo, boost = get_modes()
+            except ValueError:
+                self._logging.error("Error reading parameters to play a single note")
+            else:
+                common_play_notes(notes, length, boost, piezo)
+
+        tk.Label(window, text="Settings to use", font=GUI.SUBHEADING).grid(padx=10, pady=(10,0), sticky=tk.W, columnspan=4)
+        # Boost row
+        tk.Label(window, text="Get boost duty cycle from:").grid(row=1, column=0, padx=10, pady=(10, 0), sticky=tk.E)
+        boost_preview_modes = (str_optimised, str_fixed, str_off)
+        ttk.OptionMenu(window, boost_mode, boost_preview_modes[0], *boost_preview_modes, command=set_boost_spinbox_state).grid(row=1, column=1, padx=10, pady=10, sticky=tk.W)
+        tk.Label(window, text="Boost duty cycle % (when fixed):").grid(row=1, column=2, sticky=tk.E, padx=10, pady=10)
+        fixed_boost_spinbox = Spinbox(window,from_=0, to=100, textvariable=fixed_boost_duty, width=5)
+        fixed_boost_spinbox.grid(row=1, column=3, padx=10, pady=10, sticky=tk.W)
+        set_boost_spinbox_state()
+
+        # Piezo row
+        tk.Label(window, text="Get piezo duty cycle from:").grid(row=2, column=0, padx=10, pady=10, sticky=tk.E)
+        piezo_preview_modes = (str_optimised, str_fixed)
+        ttk.OptionMenu(window, piezo_mode, piezo_preview_modes[0], *piezo_preview_modes, command=set_piezo_spinbox_state).grid(row=2, column=1, padx=10, pady=10, sticky=tk.W)
+        tk.Label(window, text="Piezo duty cycle % (when fixed):").grid(row=2, column=2, sticky=tk.E, padx=10, pady=10)
+        fixed_piezo_spinbox = Spinbox(window,from_=0, to=100, textvariable=fixed_piezo_duty, width=5)
+        fixed_piezo_spinbox.grid(row=2, column=3, padx=10, pady=10, sticky=tk.W)
+        set_piezo_spinbox_state()
+
+        # Options to play notes
+        tk.Label(window, text="Notes to play", font=GUI.SUBHEADING).grid(sticky=tk.W, columnspan=4, padx=10, pady=(10, 0))
+        # Single
+        tk.Label(window, text="Single MIDI note to play:").grid(row=4, column=0, sticky=tk.E, padx=10, pady=(10,0))
+        midi_single_note = tk.StringVar(value=90)
+        Spinbox(window, from_=Optimiser.MIN_MIDI_NOTE, to=Optimiser.MAX_MIDI_NOTE, textvariable=midi_single_note, width=5).grid(row=4, column=1, sticky=tk.W, padx=10, pady=(10, 0))
+        # Sweep
+        tk.Label(window, text="Sweep of MIDI notes to play").grid(row=5, column=0, sticky=tk.E, padx=10, pady=(10,0))
+        range_frame = tk.Frame(window)
+        tk.Label(range_frame, text="Start:").grid(row=0, column=0, sticky=tk.E, padx=10, pady=(10,0))
+        midi_note_min = tk.StringVar(value=Optimiser.MIN_MIDI_NOTE)
+        Spinbox(range_frame, from_=Optimiser.MIN_MIDI_NOTE, to=Optimiser.MAX_MIDI_NOTE, textvariable=midi_note_min, width=5).grid(row=0, column=1, sticky=tk.W, padx=10, pady=(10, 0))
+        tk.Label(range_frame, text="Stop:").grid(row=0, column=2, sticky=tk.E, padx=10, pady=(10,0))
+        midi_note_max = tk.StringVar(value=Optimiser.MAX_MIDI_NOTE)
+        Spinbox(range_frame, from_=Optimiser.MIN_MIDI_NOTE, to=Optimiser.MAX_MIDI_NOTE, textvariable=midi_note_max, width=5).grid(row=0, column=3, sticky=tk.W, padx=10, pady=(10, 0))
+        tk.Label(range_frame, text="Step:").grid(row=0, column=4, sticky=tk.E, padx=10, pady=(10,0))
+        midi_note_step = tk.StringVar(value=1)
+        Spinbox(range_frame, from_=-Optimiser.MAX_MIDI_NOTE, to=Optimiser.MAX_MIDI_NOTE, textvariable=midi_note_step, width=5).grid(row=0, column=5, sticky=tk.W, padx=10, pady=(10, 0))
+        range_frame.columnconfigure(tuple(range(6)), weight=1)
+        range_frame.grid(row=6, columnspan=4, sticky=tk.NSEW)
+        # Duration
+        tk.Label(window, text="Time to play each note (single & sweep), ms:").grid(row=7, columnspan=2, sticky=tk.E)
+        duration = tk.StringVar(value=1000)
+        Spinbox(window, from_=100, to=10000, textvariable=duration, width=5).grid(row=7, column=2, sticky=tk.W, padx=10, pady=10)
+
+        # Play
+        single_button = ttk.Button(window, text="Play single note", command=play_note)
+        single_button.grid(row=8, padx=10, pady=10, sticky=tk.NSEW, columnspan=2)
+        sweep_button = ttk.Button(window, text="Play sweep", command=play_sweep)
+        sweep_button.grid(row=8, column=2, padx=10, pady=10, sticky=tk.NSEW, columnspan=2)
+
+        window.columnconfigure(tuple(range(4)), weight=1)
         
     def _close_window(self):
         """Calls everything this is meant to call before closing, then destroys the window

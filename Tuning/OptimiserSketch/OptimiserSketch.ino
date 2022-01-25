@@ -17,10 +17,8 @@
 #define BOOST_PIN 11 // Fixed as PB3 (Pin 11 on Arduino Nano)
 #define LED_EXTERNAL 7
 #define SERIAL_BAUD 38400
-#define EEPROM_TIMER1_PIECEWISE 1 // TODO: Work out bytes and addresses that don't interfere with EEPROM wear leveling 
-#define EEPROM_TIMER2_PIECEWISE 82 // 81 bytes for up to 10 points
 
-#define VERSION "0.0.1"
+#define VERSION "1.0.0"
 #define WELCOME_MSG "Bike horn OPTIMISER V" VERSION " started. Compiled " __TIME__ ", " __DATE__
 
 static FILE uartout = {0}; // https://playground.arduino.cc/Main/Printf/
