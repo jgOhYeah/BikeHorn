@@ -32,7 +32,6 @@ import numpy as np
 import threading
 from typing import Iterable, Tuple
 import datetime
-from enum import Enum, auto
 
 # TODO: Load / save a default settings file automatically (not necessary, but might be convenient)
 # TODO: Standard deviation / different from those around a data point as a measure of uncertainty when fitting to avoid noise / didgy data
