@@ -2,6 +2,8 @@
 A "musical" siren for bicycles.
 <img alt="Overview photo of the horn from an angle" src="Images/Overview_NB_Small.png" width="200px" align="right">
 
+This design was published in the Circuit Notebook section of the [Februrary 2022 issue](https://www.siliconchip.com.au/Issue/2022/February) of the Silicon Chip magazine. Feel free to have a look there if you would like a nice explanation / writeup of the horn's operations and construction.
+
 ## Main steps for building and usage
 1. Modify the Arduino nano for low power and low voltage usage.
 2. Build the circuit - see [BikeHornPCB](BikeHornPCB) for a PCB design. The siren is from an old smoke alarm.
@@ -11,6 +13,7 @@ A "musical" siren for bicycles.
 6. Upload to the Arduino and test.
 7. Mount on bicycle / vehicle and have fun.
 
-A low resolution gif that gives an idea of order of assembly:
+See the Silicon Chip section or the [Images directory](Images) for relevent diagrams and images of the horn.
 
+A low resolution gif that gives an idea of order of assembly:  
 ![AssemblyGIF.gif](Images/AssemblyGIF.gif)
