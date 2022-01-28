@@ -4,13 +4,33 @@
  * 
  * Written by Jotham Gates
  * 
- * Last modified 01/10/2021
+ * Last modified 11/01/2022
  */
 
+/**
+ * @brief Handles the task of making the most noise possible.
+ * 
+ */
 class BikeHornSound : public TimerOneSound {
     public:
+        void begin() {
+            // Load and print configs
+            if(m_timer1Piecewise.begin(EEPROM_TIMER1_PIECEWISE) && m_timer2Piecewise.begin(EEPROM_TIMER2_PIECEWISE)) {
+                Serial.println(F("Timer 1 Optimisation settings:"));
+                m_timer1Piecewise.print();
+                Serial.println();
+                Serial.println(F("Timer 2 Optimisation settings:"));
+                m_timer2Piecewise.print();
+            } else {
+                // There was an issue initialising the piecewise functions
+                Serial.println(F("ERROR: At least 1 piecewise function for optimising volume was a bit suspect and could not be loaded from EEPROM.\r\nAre you sure you have uploaded the optimised functions to EEPROM and the addresses are correct?\r\nSee https://github.com/jgOhYeah/BikeHorn/tree/main/Tuning for more info."));
+            }
+        }
+
         /** Stops the sound and sets the boost pwm back to idle */
         void stopSound() {
+            TIMSK1 = 0; // Disable the interrupt for changing the piezo frequency (warble mode).
+
             // Shutdown timer 1
             TCCR1A = 0;
             TCCR1B = 0;
@@ -48,36 +68,13 @@ class BikeHornSound : public TimerOneSound {
     private:
         /** Returns the value at which the pin should go low each time. Also sets the pwm duty of boost as it is called around the right time */
         uint16_t m_compareValue(uint16_t counter) {
-            // For Timer 2: (May need to be adjusted / optimised by hand
-            uint16_t timer2Comp;
-            if(counter > 16197) {
-                timer2Comp = 183;
-            } else if(counter > 9089) {
-                timer2Comp = 258 - counter/215;
-            } else if(counter > 1011) {
-                timer2Comp = 216;
-            } else if(counter > 424) {
-                timer2Comp = counter/9 + 107;
-            } else {
-                timer2Comp = 153;
-            }
-
-            // For Timer 1: (May need to be adjusted / optimised by hand
-            uint16_t timer1Comp;
-            if(counter > 13619) {
-                timer1Comp = counter;
-            } else if(counter > 1350) {
-                timer1Comp = 1*counter - 1304;
-            } else if(counter > 158) {
-                timer1Comp = counter/12 - 1;
-            } else {
-                timer1Comp = 12;
-            }
-
             // Set Timer 2 now (a bit not proper, but should work)
-            OCR2A = timer2Comp;
-            return timer1Comp;
+            OCR2A = m_timer2Piecewise.apply(counter);
+            return m_timer1Piecewise.apply(counter);
         }
+
+        PiecewiseLinear m_timer1Piecewise;
+        PiecewiseLinear m_timer2Piecewise;
 };
 
 // TODO: Put this as a static method in the sound generator class to be not so ugly.
@@ -86,7 +83,7 @@ volatile uint16_t BikeHornSound::nextComp;
 
 /**
  * Interrupt for timer overflow to change the frequency of the warble safely at the correct time in the cycle without
- * using a double bug=ffered register. The manual suggests OCR1A should be set as top as it is double buffered, however
+ * using a double buffered register. The manual suggests OCR1A should be set as top as it is double buffered, however
  * this will disable PWM on the pin I am using.
  * 
  * The risk of changing ICR1 randomly at any time is that a reset of the counter only happens when the counter equals
@@ -113,43 +110,43 @@ class Warble {
          * Initialises the library with the given parameters
          */
         void begin(BikeHornSound *newSoundGenerator, uint16_t newLower, uint16_t newUpper, uint32_t newRiseTime, uint32_t newFallTime) {
-            soundGenerator = newSoundGenerator;
-            soundGenerator->begin();
+            m_soundGenerator = newSoundGenerator;
+            // m_soundGenerator->begin();
 
-            lower = newLower;
-            upper = newUpper;
-            riseTime = newRiseTime;
-            fallTime = newFallTime;
+            m_lower = newLower;
+            m_upper = newUpper;
+            m_riseTime = newRiseTime;
+            m_fallTime = newFallTime;
         }
 
         /**
          * Updates the chirp as required
          */
         void update() {
-            if(isActive) {
+            if(m_isActive) {
                 uint32_t time = micros();
-                if(time - lastUpdate > updateInterval) {
-                    lastUpdate = time;
-                    if(isRising) {
-                        if(frequency != upper) {
+                if(time - m_lastUpdate > m_updateInterval) {
+                    m_lastUpdate = time;
+                    if(m_isRising) {
+                        if(m_frequency != m_upper) {
                             // Keep going up
-                            frequency++;
+                            m_frequency+=WARBLE_STEP;
                         } else {
                             // Swap to falling
-                            isRising = false;
-                            updateInterval = timeStep(fallTime);
+                            m_isRising = false;
+                            m_updateInterval = m_timeStep(m_fallTime);
                         }
                     } else {
-                        if(frequency != lower) {
+                        if(m_frequency != m_lower) {
                             // Keep going down
-                            frequency--;
+                            m_frequency-=WARBLE_STEP;
                         } else {
                             // Swap to rising
-                            isRising = true;
-                            updateInterval = timeStep(riseTime);
+                            m_isRising = true;
+                            m_updateInterval = m_timeStep(m_riseTime);
                         }
                     }
-                    soundGenerator->changeFreq(frequency);
+                    m_soundGenerator->changeFreq(m_frequency);
                 }
             }
         }
@@ -158,31 +155,31 @@ class Warble {
          * Starts the chirp
          */
         void start() {
-            isRising = false;
-            lastUpdate = micros();
-            frequency = upper;
-            isActive = true;
-            updateInterval = timeStep(fallTime);
-            soundGenerator->playFreq(frequency);
+            m_isRising = false;
+            m_lastUpdate = micros();
+            m_frequency = m_upper;
+            m_isActive = true;
+            m_updateInterval = m_timeStep(m_fallTime);
+            m_soundGenerator->playFreq(m_frequency);
         }
 
         /**
          * Stops all sound
          */
         void stop() {
-            soundGenerator->stopSound();
-            isActive = false;
+            m_soundGenerator->stopSound();
+            m_isActive = false;
         }
 
     private:
-        BikeHornSound *soundGenerator;
-        uint16_t lower, upper, frequency;
-        bool isRising;
-        bool isActive = false;
-        uint32_t lastUpdate, updateInterval, riseTime, fallTime;
+        BikeHornSound *m_soundGenerator;
+        uint16_t m_lower, m_upper, m_frequency;
+        bool m_isRising;
+        bool m_isActive = false;
+        uint32_t m_lastUpdate, m_updateInterval, m_riseTime, m_fallTime;
 
-        uint32_t timeStep(uint32_t sweepTime) {
-            return sweepTime / (upper - lower);
+        uint32_t m_timeStep(uint32_t sweepTime) {
+            return WARBLE_STEP * sweepTime / (m_upper - m_lower);
         }
 
 };

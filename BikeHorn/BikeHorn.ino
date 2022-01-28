@@ -5,7 +5,7 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 19/09/2021
+ * Last modified 11/01/2022
  * 
  * Requires these libraries (can be installed through the library manager):
  *   - Low-Power (https://github.com/rocketscream/Low-Power) - Shuts things down to save power.
@@ -18,16 +18,31 @@
 
 #include "defines.h"
 
-// Libraries to include. EEPROMWearLevel is only required if LOG_RUN_TIME is
-// defined in defines.h
+// Libraries to include.
 #include <cppQueue.h>
 #include <LowPower.h>
 #include <TunePlayer.h>
+#include <EEPROM.h>
+
+// EEPROMWearLevel is only required if LOG_RUN_TIME is defined in defines.h
 #ifdef LOG_RUN_TIME
     #include <EEPROMWearLevel.h>
 #endif
 
+// Only needed for the watchdog timer (DO NOT enable for Arduinos with the old bootloader).
+#ifdef ENABLE_WATCHDOG_TIMER
+    #include <avr/wdt.h>
+    #define WATCHDOG_ENABLE wdt_enable(WDTO_4S)
+    #define WATCHDOG_DISABLE wdt_disable()
+    #define WATCHDOG_RESET wdt_reset()
+#else
+    #define WATCHDOG_ENABLE
+    #define WATCHDOG_DISABLE
+    #define WATCHDOG_RESET
+#endif
+
 #include "tunes.h"
+#include "optimisations.h"
 #include "soundGeneration.h"
 
 FlashTuneLoader flashLoader;
@@ -49,6 +64,8 @@ enum WakePin {none, horn, mode};
 volatile WakePin wakePin;
 
 void setup() {
+    WATCHDOG_ENABLE;
+    sleepGPIO(); // Shutdown the timers if the horn crashed previously
     wakeGPIO();
     Serial.println(F(WELCOME_MSG));
     Serial.print(F("There are "));
@@ -57,7 +74,7 @@ void setup() {
 
     // Logging (optional)
 #ifdef LOG_RUN_TIME
-    EEPROMwl.begin(LOG_VERSION, 2);
+    EEPROMwl.begin(LOG_VERSION, 2, EEPROM_WEAR_LEVEL_LENGTH);
     Serial.print(F("Run time logging enabled. Horn has been sounding for "));
     Serial.print(getTime() / 1000);
     Serial.println(F(" seconds."));
@@ -80,34 +97,35 @@ void setup() {
     // Go to midi synth mode if change mode and horn button pressed or reset the eeprom.
     if(!digitalRead(BUTTON_MODE)) {
 #ifdef LOG_RUN_TIME
-    if(!digitalRead(BUTTON_HORN)) {
-        // Both buttons pressed. If both are pressed for 5 seconds, reset the EEPROM.
-        uint32_t startTime = millis();
-        bool success = true;
-        digitalWrite(LED_BUILTIN, HIGH);
-        while(millis() - startTime < 5000) {
-            if(digitalRead(BUTTON_HORN) | digitalRead(BUTTON_MODE)) {
-                success = false;
-                break;
+        if(!digitalRead(BUTTON_HORN)) {
+            // Both buttons pressed. If both are pressed for 5 seconds, reset the EEPROM.
+            uint32_t startTime = millis();
+            bool success = true;
+            digitalWrite(LED_BUILTIN, HIGH);
+            while(millis() - startTime < 5000) {
+                WATCHDOG_RESET;
+                if(digitalRead(BUTTON_HORN) | digitalRead(BUTTON_MODE)) {
+                    success = false;
+                    break;
+                }
+                digitalWrite(LED_EXTERNAL, HIGH);
+                delay(100);
+                digitalWrite(LED_EXTERNAL, LOW);
+                delay(100);
             }
-            digitalWrite(LED_EXTERNAL, HIGH);
-            delay(100);
-            digitalWrite(LED_EXTERNAL, LOW);
-            delay(100);
-        }
-        digitalWrite(LED_BUILTIN, LOW);
+            digitalWrite(LED_BUILTIN, LOW);
 
-        // Check if we left early or at the full time
-        if(success) {
-            Serial.println(F("Resetting EEPROM"));
-            resetEEPROM();
+            // Check if we left early or at the full time
+            if(success) {
+                Serial.println(F("Resetting EEPROM"));
+                resetEEPROM();
+            }
+        } else {
+            // Only the change tune button pressed. Midi mode.
+            midiSynth();
         }
-    } else {
-        // Only the change tune button pressed. Midi mode.
-        midiSynth();
-    }
 #else
-    midiSynth();
+        midiSynth();
 #endif
     }
 }
@@ -120,9 +138,11 @@ void loop() {
         // Set interrupts to wake the processor up again when required
         attachInterrupt(digitalPinToInterrupt(BUTTON_HORN), wakeUpHornISR, LOW);
         attachInterrupt(digitalPinToInterrupt(BUTTON_MODE), wakeUpModeISR, LOW);
+        WATCHDOG_DISABLE;
         LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF); // The horn will spend most of its life here
         detachInterrupt(digitalPinToInterrupt(BUTTON_HORN));
         detachInterrupt(digitalPinToInterrupt(BUTTON_MODE));
+        WATCHDOG_ENABLE;
         wakeGPIO();
         Serial.println(F("Waking up"));
     } else {
@@ -158,17 +178,21 @@ void loop() {
         uint32_t startTime = millis();
         uint32_t curTime = millis();
         while (curTime - startTime < DEBOUNCE_TIME) {
+            WATCHDOG_RESET;
 
 #ifdef ENABLE_WARBLE
+            // Update warbling or the tune
             if(curTune != tuneCount) {
                 tune.update();
             } else {
                 warble.update();
             }
 #else
+            // Update the tune
             tune.update();
 #endif
 
+            // Flash the LED every so often
             static uint32_t ledStart = curTime;
             if(curTime - ledStart > 125) {
                 ledStart = curTime;
@@ -215,6 +239,7 @@ void loop() {
         // Only let go once button is not pushed for more than DEBOUNCE_TIME
         uint32_t startTime = millis();
         while(millis() - startTime < DEBOUNCE_TIME) {
+            WATCHDOG_RESET;
             if(!digitalRead(BUTTON_MODE)) {
                 startTime = millis();
             }
@@ -320,6 +345,7 @@ void midiSynth() {
     uint8_t currentNote;
 
     while(digitalRead(BUTTON_HORN)) {
+        WATCHDOG_RESET;
         uint8_t incomingNote; // The next byte to be read off the serial buffer.
         uint8_t midiPitch; // The MIDI note number.
         uint8_t midiVelocity; //The velocity of the note.
@@ -357,7 +383,9 @@ void midiSynth() {
 
 /** Wait for an incoming note and return the note. */
 byte getByte() {
-    while (!Serial.available() && digitalRead(BUTTON_HORN)) {} //Wait while there are no bytes to read in the buffer.
+    while (!Serial.available() && digitalRead(BUTTON_HORN)) {
+        WATCHDOG_RESET;
+    } //Wait while there are no bytes to read in the buffer.
     return Serial.read();
 }
 
