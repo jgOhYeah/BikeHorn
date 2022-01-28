@@ -5,7 +5,7 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 25/11/2021
+ * Last modified 11/01/2022
  * 
  * Requires these libraries (can be installed through the library manager):
  *   - Low-Power (https://github.com/rocketscream/Low-Power) - Shuts things down to save power.
@@ -22,6 +22,7 @@
 #include <cppQueue.h>
 #include <LowPower.h>
 #include <TunePlayer.h>
+#include <EEPROM.h>
 
 // EEPROMWearLevel is only required if LOG_RUN_TIME is defined in defines.h
 #ifdef LOG_RUN_TIME
@@ -41,6 +42,7 @@
 #endif
 
 #include "tunes.h"
+#include "optimisations.h"
 #include "soundGeneration.h"
 
 FlashTuneLoader flashLoader;
@@ -72,7 +74,7 @@ void setup() {
 
     // Logging (optional)
 #ifdef LOG_RUN_TIME
-    EEPROMwl.begin(LOG_VERSION, 2);
+    EEPROMwl.begin(LOG_VERSION, 2, EEPROM_WEAR_LEVEL_LENGTH);
     Serial.print(F("Run time logging enabled. Horn has been sounding for "));
     Serial.print(getTime() / 1000);
     Serial.println(F(" seconds."));
