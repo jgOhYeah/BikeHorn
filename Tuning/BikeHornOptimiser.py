@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+"""BikeHornOptimiser.py
+An application for optimising the piezo and boost duty cycles of the bike horn for maximum volume.
+
+For more details, see Readme.md or go to
+https://github.com/jgOhYeah/BikeHorn/tree/main/Tuning
+
+Written by Jotham Gates
+Last modified 28/02/2022
+"""
 # GUI libraries
 import tkinter as tk                    
 from tkinter import ttk
@@ -34,15 +43,13 @@ from typing import Iterable, Tuple
 import datetime
 
 # TODO: Load / save a default settings file automatically (not necessary, but might be convenient)
-# TODO: Standard deviation / different from those around a data point as a measure of uncertainty when fitting to avoid noise / didgy data
+# TODO: Standard deviation / different from those around a data point as a measure of uncertainty when fitting to avoid noise
 # TODO: Cope with someone trying to test, optimise and upload at the same time
-# TODO: Test warble / sweep
 # TODO: Measure voltage as well
 # TODO: Semi - Random / non sequential order of testing
-# TODO: Cope with backing up actual filenames
 
 name = "Bike Horn Optimiser Tool"
-version = "1.0.0"
+version = "1.0.1"
 
 # For python 3.6 (https://stackoverflow.com/a/52440947)
 class Spinbox(ttk.Entry):
@@ -1949,15 +1956,16 @@ Starting from EEPROM address {} using {} bytes:
         # Getting data and plotting it
         piezo_range = self._data_manager.get_piezo_range()
         if piezo_range:
+            piezo_range = piezo_range[0:len(sound_data[val][0])] # Make sure if a test was aborted that the ranges are trimmed
             boost_range = self._data_manager.get_boost_range()
             if boost_range:
+                boost_range = boost_range[0:len(sound_data[val])]
                 piezo_mesh, boost_mesh = np.meshgrid(piezo_range, boost_range)
 
                 # Update the title
                 self._results_fig.suptitle("Performance for midi note {}".format(self._data_manager.get_midi_range()[val]))
 
                 # Process data and get the maximum and minimum
-                sound_data = np.array(self._data_manager.get_sound_data())
                 loudness = sound_data[val]
 
                 # Display subplot 1
@@ -2214,17 +2222,17 @@ class AudioLevels():
         if self._gui:
             self._gui.set_sound_level(self._audio_level)
 
-# if __name__ == "__main__":
-logging = Logging()
-data_manager = DataManager(logging)
-bike_horn = BikeHornInterface(logging, data_manager)
-optimiser = Optimiser(logging, data_manager, bike_horn)
-gui = GUI(logging, bike_horn, data_manager, optimiser)
-optimiser.set_gui(gui)
-bike_horn.set_gui(gui)
-audio = AudioLevels(gui)
-bike_horn.set_audio(audio)
-logging.set_gui(gui)
-gui.draw()
-audio.start()
-gui.run()
+if __name__ == "__main__":
+    logging = Logging()
+    data_manager = DataManager(logging)
+    bike_horn = BikeHornInterface(logging, data_manager)
+    optimiser = Optimiser(logging, data_manager, bike_horn)
+    gui = GUI(logging, bike_horn, data_manager, optimiser)
+    optimiser.set_gui(gui)
+    bike_horn.set_gui(gui)
+    audio = AudioLevels(gui)
+    bike_horn.set_audio(audio)
+    logging.set_gui(gui)
+    gui.draw()
+    audio.start()
+    gui.run()

@@ -27,7 +27,7 @@ Download this repository or at the very least [`BikeHornOptimiser.py`](BikeHornO
 ## Initial setup and running a test
 1. Upload the [Optimiser Sketch](OptimiserSketch) to the horn.
 2. Find a quiet place to make not very quiet for the next little while.
-3. Run [`BikeHornOptimiser.py`](BikeHornOptimiser.py). On Windows, this seems to be a little slow in starting. If no window appears, attempt to run the script from the terminal and see if there is any error messages or missing libraries reported. A window should appear looking something like this:  
+3. Run [`BikeHornOptimiser.py`](BikeHornOptimiser.py). In the terminal, this will be something like `python3 BikeHornOptimiser.py`. On Windows, this seems to be a little slow in starting. If no window appears, attempt to run the script from the terminal and see if there is any error messages or missing libraries reported. A window should appear looking something like this:  
 ![Labelled diagram of the bike horn optimiser application, showing the tabbed layout](images/OptimiserLabelledDiagram.png)
 4. If you have existing test data with settings you would like to reuse, open this file using the *Save / Load results* tab (see the [Saving and loading test results](#saving-and-loading-test-results).
 5. Navigate to the *Run Test / Serial* tab (you will be on it by default). Connect the horn to the computer using a mini usb cable and select its serial port (something like `COM6` on Windows and `/dev/ttyUSB0` or `/dev/ttyACM0` on other operating systems). Try clicking the *Refresh* button if the serial port is not listed.
