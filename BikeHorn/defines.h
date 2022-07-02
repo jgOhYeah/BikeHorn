@@ -5,10 +5,10 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 11/01/2022
+ * Last modified 07/03/2022
  */
  
-#define VERSION "1.3.0b"
+#define VERSION "1.4.0a"
 
 /**
  * @brief Pins and system setup
@@ -47,13 +47,10 @@
  * 
  */
 #define LOG_RUN_TIME // Define this if you want to keep a record of run time when in horn mode for battery usage analysis.
-
-#define LOG_VERSION 3
 #define EEPROM_PIECEWISE_SIZE 81 // 1 length byte + 10 linear functions for a piecewise function
 #define EEPROM_TIMER1_PIECEWISE 0x35e // Near the end so that the wear levelling can have the start
 #define EEPROM_TIMER2_PIECEWISE EEPROM_TIMER1_PIECEWISE + EEPROM_PIECEWISE_SIZE
 #define EEPROM_PIECEWISE_MAX_LENGTH 10 // Max number of functions piecewise function for sanity checking before allocating ram.
-#define EEPROM_WEAR_LEVEL_LENGTH 1024 - 2*EEPROM_PIECEWISE_SIZE // Leave enough space at the end for the optimiser settings
 
 /**
  * @brief Other defines

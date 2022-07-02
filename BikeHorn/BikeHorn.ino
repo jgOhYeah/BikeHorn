@@ -5,7 +5,7 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 11/01/2022
+ * Last modified 01/07/2022
  * 
  * Requires these libraries (can be installed through the library manager):
  *   - Low-Power (https://github.com/rocketscream/Low-Power) - Shuts things down to save power.
@@ -24,11 +24,6 @@
 #include <TunePlayer.h>
 #include <EEPROM.h>
 
-// EEPROMWearLevel is only required if LOG_RUN_TIME is defined in defines.h
-#ifdef LOG_RUN_TIME
-    #include <EEPROMWearLevel.h>
-#endif
-
 // Only needed for the watchdog timer (DO NOT enable for Arduinos with the old bootloader).
 #ifdef ENABLE_WATCHDOG_TIMER
     #include <avr/wdt.h>
@@ -41,6 +36,7 @@
     #define WATCHDOG_RESET
 #endif
 
+#include "extensions/extensions.h"
 #include "tunes.h"
 #include "optimisations.h"
 #include "soundGeneration.h"
@@ -52,11 +48,6 @@ uint8_t curTune = 0;
 
 #ifdef ENABLE_WARBLE
 Warble warble;
-#endif
-
-
-#ifdef LOG_RUN_TIME
-uint32_t startTime;
 #endif
 
 // Stores which pin was responsible for waking the system up.
@@ -72,17 +63,8 @@ void setup() {
     Serial.print(tuneCount);
     Serial.println(F(" tunes installed"));
 
-    // Logging (optional)
-#ifdef LOG_RUN_TIME
-    EEPROMwl.begin(LOG_VERSION, 2, EEPROM_WEAR_LEVEL_LENGTH);
-    Serial.print(F("Run time logging enabled. Horn has been sounding for "));
-    Serial.print(getTime() / 1000);
-    Serial.println(F(" seconds."));
-    Serial.print(F("The horn has been used "));
-    Serial.print(getBeeps());
-    Serial.println(F(" times."));
-
-#endif
+    // Extensions
+    extensionManager.callOnStart();
 
     // Tune Player
     flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
@@ -96,37 +78,7 @@ void setup() {
 
     // Go to midi synth mode if change mode and horn button pressed or reset the eeprom.
     if(!digitalRead(BUTTON_MODE)) {
-#ifdef LOG_RUN_TIME
-        if(!digitalRead(BUTTON_HORN)) {
-            // Both buttons pressed. If both are pressed for 5 seconds, reset the EEPROM.
-            uint32_t startTime = millis();
-            bool success = true;
-            digitalWrite(LED_BUILTIN, HIGH);
-            while(millis() - startTime < 5000) {
-                WATCHDOG_RESET;
-                if(digitalRead(BUTTON_HORN) | digitalRead(BUTTON_MODE)) {
-                    success = false;
-                    break;
-                }
-                digitalWrite(LED_EXTERNAL, HIGH);
-                delay(100);
-                digitalWrite(LED_EXTERNAL, LOW);
-                delay(100);
-            }
-            digitalWrite(LED_BUILTIN, LOW);
-
-            // Check if we left early or at the full time
-            if(success) {
-                Serial.println(F("Resetting EEPROM"));
-                resetEEPROM();
-            }
-        } else {
-            // Only the change tune button pressed. Midi mode.
-            midiSynth();
-        }
-#else
         midiSynth();
-#endif
     }
 }
 
@@ -134,6 +86,7 @@ void loop() {
     // Go to sleep if not pressed and wake up when a button is pressed
     if(digitalRead(BUTTON_HORN)) {
         Serial.println(F("Going to sleep"));
+        extensionManager.callOnSleep();
         sleepGPIO();
         // Set interrupts to wake the processor up again when required
         attachInterrupt(digitalPinToInterrupt(BUTTON_HORN), wakeUpHornISR, LOW);
@@ -145,6 +98,7 @@ void loop() {
         WATCHDOG_ENABLE;
         wakeGPIO();
         Serial.println(F("Waking up"));
+        extensionManager.callOnWake();
     } else {
         wakePin = horn;
     }
@@ -152,10 +106,7 @@ void loop() {
     // If we got here, a button was pressed
     if(wakePin == horn) {
         // Play a tune
-
-#ifdef LOG_RUN_TIME
-        uint32_t wakeTime = millis();
-#endif
+        extensionManager.callOnTuneStart();
         // Start playing
         startBoost();
 
@@ -206,10 +157,7 @@ void loop() {
             }
             curTime = millis();
         }
-#ifdef LOG_RUN_TIME
-        addTime(millis() - wakeTime);
-        addBeep();
-#endif
+        extensionManager.callOnTuneStop();
     } else {
         // Change tune as the other button is pressed
         digitalWrite(LED_EXTERNAL, HIGH);
@@ -388,38 +336,3 @@ byte getByte() {
     } //Wait while there are no bytes to read in the buffer.
     return Serial.read();
 }
-
-// Stuff only needed if recording run time.
-#ifdef LOG_RUN_TIME
-/** @returns the time the horn has been sounding in ms */
-uint32_t getTime() {
-    uint32_t time;
-    EEPROMwl.get(0, time);
-    return time;
-}
-
-/** Add @param time in ms to the total time the horn has been sounding */
-void addTime(uint32_t time) {
-    time += getTime();
-    EEPROMwl.put(0, time);
-}
-
-/** @returns the number of times the horn has gone off */
-uint16_t getBeeps() {
-    uint16_t beeps;
-    EEPROMwl.get(1, beeps);
-    return beeps;
-}
-
-/** Adds 1 to the number of times the horn has gone off */
-void addBeep() {
-    uint16_t beeps = getBeeps() + 1;
-    EEPROMwl.put(1, beeps);
-}
-
-/** Resets stored data to 0 */
-void resetEEPROM() {
-    EEPROMwl.put(0, (uint32_t)0);
-    EEPROMwl.put(1, (uint16_t)0);
-}
-#endif
