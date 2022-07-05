@@ -13,7 +13,11 @@
 RunTimeLogger runTimeLogger;
 #endif
 
+#include "exampleExtension.h"
+ExampleExtension exampleExtension;
+
 Extension* extensionsArray[] = {
+    &exampleExtension,
 #ifdef LOG_RUN_TIME
     &runTimeLogger,
 #endif

@@ -36,6 +36,7 @@
     #define WATCHDOG_RESET
 #endif
 
+uint32_t modeButtonPress(); // Prototype so that the extension manager is happy
 #include "extensions/extensions.h"
 #include "tunes.h"
 #include "optimisations.h"
@@ -127,7 +128,7 @@ void loop() {
         bool ledState = true;
 
         uint32_t startTime = millis();
-        uint32_t curTime = millis();
+        uint32_t curTime = startTime;
         while (curTime - startTime < DEBOUNCE_TIME) {
             WATCHDOG_RESET;
 
@@ -161,42 +162,38 @@ void loop() {
     } else {
         // Change tune as the other button is pressed
         digitalWrite(LED_EXTERNAL, HIGH);
-        curTune++;
-#ifdef ENABLE_WARBLE
-        if(curTune > tuneCount) { // Use == for the warble mode
-            curTune = 0;
-        }
-        if(curTune != tuneCount) {
-            // Change tune as normal
-#else
-        if(curTune == tuneCount) {
-            curTune = 0;
-        }
-#endif
-            Serial.print(F("Changing to tune "));
-            Serial.println(curTune);
-            flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
-#ifdef ENABLE_WARBLE
-        } else {
-            // Don't do anything here and select on the fly
-            Serial.println(F("Changing to warble mode"));
-
-        }
-#endif
 
         // Only let go once button is not pushed for more than DEBOUNCE_TIME
-        uint32_t startTime = millis();
-        while(millis() - startTime < DEBOUNCE_TIME) {
-            WATCHDOG_RESET;
-            if(!digitalRead(BUTTON_MODE)) {
-                startTime = millis();
-            }
+        uint32_t pressTime = modeButtonPress();
 
-            // If the horn button is pressed, exit immediately to start playing a tune.
-            if(!digitalRead(BUTTON_HORN)) {
-                wakePin = horn;
-                break;
+        // Was this a long or short press?
+        if (pressTime < LONG_PRESS_TIME) {
+            // Short press, change tune
+            curTune++;
+#ifdef ENABLE_WARBLE
+            if(curTune > tuneCount) { // Use == for the warble mode
+                curTune = 0;
             }
+            if(curTune != tuneCount) {
+                // Change tune as normal
+#else
+            if(curTune == tuneCount) {
+                curTune = 0;
+            }
+#endif
+                Serial.print(F("Changing to tune "));
+                Serial.println(curTune);
+                flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
+#ifdef ENABLE_WARBLE
+            } else {
+                // Don't do anything here and select on the fly
+                Serial.println(F("Changing to warble mode"));
+
+            }
+#endif
+        } else {
+            // Long press, display menu for extensions
+            extensionManager.displayMenu();
         }
     }
 
@@ -335,4 +332,29 @@ byte getByte() {
         WATCHDOG_RESET;
     } //Wait while there are no bytes to read in the buffer.
     return Serial.read();
+}
+
+/**
+ * @brief Waits until the mode button has been released and returns the time
+ * it was pressed in ms. If the horn button is pressed at any time, returns 1.
+ * 
+ * @return uint32_t 
+ */
+uint32_t modeButtonPress() {
+    // Only let go once button is not pushed for more than DEBOUNCE_TIME
+    uint32_t pressTime = millis();
+    uint32_t debounceTime = pressTime;
+    while(millis() - debounceTime < DEBOUNCE_TIME) {
+        WATCHDOG_RESET;
+        if(!digitalRead(BUTTON_MODE)) {
+            debounceTime = millis();
+        }
+
+        // If the horn button is pressed, exit immediately to start playing a tune.
+        if(!digitalRead(BUTTON_HORN)) {
+            wakePin = horn;
+            return 1;
+        }
+    }
+    return millis() - pressTime;
 }

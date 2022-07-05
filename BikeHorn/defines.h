@@ -53,6 +53,13 @@
 #define EEPROM_PIECEWISE_MAX_LENGTH 10 // Max number of functions piecewise function for sanity checking before allocating ram.
 
 /**
+ * @brief User interface
+ * 
+ */
+#define LONG_PRESS_TIME 4000
+#define MENU_TIMEOUT 30000
+
+/**
  * @brief Other defines
  * 
  */
