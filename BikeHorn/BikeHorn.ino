@@ -36,8 +36,9 @@
     #define WATCHDOG_RESET
 #endif
 
-uint32_t modeButtonPress(); // Prototype so that the extension manager is happy
-#include "extensions/extensions.h"
+uint32_t modeButtonPress(); // Prototypes so that the extension manager is happy
+void startBoost();
+
 #include "tunes.h"
 #include "optimisations.h"
 #include "soundGeneration.h"
@@ -54,6 +55,8 @@ Warble warble;
 // Stores which pin was responsible for waking the system up.
 enum WakePin {none, horn, mode};
 volatile WakePin wakePin;
+
+#include "extensions/extensions.h"
 
 void setup() {
     WATCHDOG_ENABLE;
@@ -346,6 +349,7 @@ uint32_t modeButtonPress() {
     uint32_t debounceTime = pressTime;
     while(millis() - debounceTime < DEBOUNCE_TIME) {
         WATCHDOG_RESET;
+        tune.update();
         if(!digitalRead(BUTTON_MODE)) {
             debounceTime = millis();
         }

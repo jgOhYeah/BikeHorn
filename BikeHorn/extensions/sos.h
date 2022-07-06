@@ -7,25 +7,56 @@
  * Last modified 01/07/2022
  */
 
-// TODO
+#include "extensionsManager.h"
 
-// /**
-//  * @brief SOS Mode
-//  * Plays a tune (SOS morse code) on loop until stopped.
-//  * To avoid boy who cried wolf scenarios, only use this with the SOS morse code in an emergency or for testing.
-//  */
-// #define ENABLE_SOS
-// #define SOS_CODE ENCODE(HORN, TUNE, HORN, TUNE, DONE) // Sequence of switch presses to enter SOS mode
-// #define SOS_CODE_MIN_TIME 10000 // How long the switch needs to be pressed to register
-// #define CODE_ENTRY_TIMEOUT 60000
+const uint16_t sosTune[24] PROGMEM = {// Converted from 'sos' by TunePlayer Musescore plugin V1.8.0
+    0xe1f4, // Tempo change to 500.00000000000006 BPM
+    0x9a3c,0xc038,0x9a3c,0xc038,0x9a3c,0xc038,0x9abc,0xc038,0x9abc,0xc038,
+    0x9abc,0xc038,0x9a3c,0xc038,0x9a3c,0xc038,0x9a38,0xc038,0xc078,0xc038,
+    0xc078,0xc038,
+    0xf001 // End of tune. Restart from the beginning.
+};
 
+class SosExtension: public Extension {
+    public:
+        SosExtension() {
+            menuActions.length = 1;
+            menuActions.array = (MenuItem*)malloc(sizeof(MenuItem));
+            menuActions.array[0] = (MenuItem)&SosExtension::sosMode;
+        }
+    
+    private:
+        /**
+         * @brief Plays SOS in morse code until mode change is long pressed.
+         * 
+         */
+        void sosMode() {
+            // Setup
+            Serial.println(F("Playing SOS!!!"));
+            tune.stop();
+            startBoost();
+            flashLoader.setTune(const_cast<uint16_t*>(sosTune));
+            tune.play();
+            
+            // Wait for button press
+            while (true) {
+                WATCHDOG_RESET;
+                if (!digitalRead(BUTTON_MODE)) {
+                    digitalWrite(LED_EXTERNAL, LOW);
+                    uint32_t pressTime = modeButtonPress();
+                    digitalWrite(LED_EXTERNAL, HIGH);
+                    if (pressTime >= LONG_PRESS_TIME) {
+                        // Button long pressed. Stop.
+                        break;
+                    }
+                }
+                tune.update();
+            }
 
-// /**
-//  * @brief Alarm Mode
-//  * // TODO: Not yet implemented
-//  */
-
-// // The disable alarm code. This can be up to 8 digits long, where each digit is either HORN or TUNE. If less than 8
-// // digits, terminate this with DONE.
-// #define ALARM_CODE ENCODE(HORN, TUNE, HORN, TUNE, DONE)
-
+            // Shut down
+            Serial.println(F("Stopping SOS!!!"));
+            tune.stop();
+            curTune = 0; // Reset to known state (in case warble mode below).
+            flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
+        }
+};

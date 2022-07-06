@@ -73,6 +73,7 @@ class RunTimeLogger: public Extension {
 
         /** Resets stored data to 0 */
         inline void resetEEPROM() {
+            Serial.println(F("Wiping run times"));
             EEPROMwl.put(0, (uint32_t)0);
             EEPROMwl.put(1, (uint16_t)0);
         }

@@ -8,20 +8,27 @@
 
 #include "extensionsManager.h"
 
+// Extension files and objects
 #ifdef LOG_RUN_TIME
 #include "logRunTime.h"
 RunTimeLogger runTimeLogger;
 #endif
 
-#include "exampleExtension.h"
-ExampleExtension exampleExtension;
+// #include "exampleExtension.h"
+// ExampleExtension exampleExtension;
 
+#include "sos.h"
+SosExtension sosExtension;
+
+// Array of extensions. This will be the order they appear in the menu if they have menu items.
 Extension* extensionsArray[] = {
-    &exampleExtension,
+    // &exampleExtension,
+    &sosExtension,
 #ifdef LOG_RUN_TIME
     &runTimeLogger,
 #endif
 };
-const uint8_t extensionsCount = sizeof(extensionsArray) / sizeof(Extension*);
 
+// Setting up the extensions manager
+const uint8_t extensionsCount = sizeof(extensionsArray) / sizeof(Extension*);
 ExtensionManager extensionManager(extensionsArray, extensionsCount);
