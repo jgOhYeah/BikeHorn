@@ -58,6 +58,16 @@ class Extension {
 };
 
 /**
+ * @brief Short tunes used by the user interface.
+ * 
+ */
+namespace beeps {
+    const uint16_t acknowledge[] PROGMEM = {0x0618, 0xf000};
+    const uint16_t cancel[] PROGMEM = {0x7618, 0x0618, 0xf000};
+    const uint16_t error[] PROGMEM = {0x0618, 0x0618, 0x0618, 0xf000};
+}
+
+/**
  * @brief Class for handling extensions.
  * 
  */
@@ -127,18 +137,21 @@ class ExtensionManager {
             uint8_t items = countMenuItems();
             Serial.print(items);
             Serial.println(F(" items."));
+            uiBeep(const_cast<uint16_t*>(beeps::acknowledge));
             if (items != 0) {
                 // There is at least one item in the menu
                 uint32_t lastInteractionTime = millis();
                 uint8_t selected = 0;
                 while (millis() - lastInteractionTime < MENU_TIMEOUT) {
                     WATCHDOG_RESET;
+                    tune.update();
                     if (!digitalRead(BUTTON_MODE)) {
                         digitalWrite(LED_EXTERNAL, LOW);
                         uint32_t pressTime = modeButtonPress();
                         digitalWrite(LED_EXTERNAL, HIGH);
                         if (!pressTime) {
                             // Horn button pressed. Exit.
+                            tune.stop(); // Cancel the beep if needed.
                             return;
                         } else if (pressTime < LONG_PRESS_TIME) {
                             // Button short pressed. Increment the option.
@@ -146,6 +159,7 @@ class ExtensionManager {
                             selected++;
                             if (selected == items) {
                                 selected = 0;
+                                uiBeep(const_cast<uint16_t*>(beeps::acknowledge));
                             }
                         } else {
                             // Button long pressed. Run the given function.
@@ -154,12 +168,14 @@ class ExtensionManager {
                         }
                     }
                     if (!digitalRead(BUTTON_HORN)) {
+                        tune.stop(); // Cancel the beep if needed.
                         return;
                     }
                 }
             }
             // Timed out or no extensions with menu items enabled.
             Serial.println(F("Timed out."));
+            uiBeep(const_cast<uint16_t*>(beeps::cancel));
         }
 
     private:

@@ -20,6 +20,9 @@ RunTimeLogger runTimeLogger;
 #include "sos.h"
 SosExtension sosExtension;
 
+#include "midiSynth.h"
+MidiSynthExtension midiSynth;
+
 // Array of extensions. This will be the order they appear in the menu if they have menu items.
 Extension* extensionsArray[] = {
     // &exampleExtension,
@@ -27,6 +30,7 @@ Extension* extensionsArray[] = {
 #ifdef LOG_RUN_TIME
     &runTimeLogger,
 #endif
+    &midiSynth
 };
 
 // Setting up the extensions manager

@@ -1,10 +1,10 @@
 /** sos.h
- * FOR EMERGENCIES ONLY!!!
+ * Avoid boy who cried wolf situations - FOR EMERGENCIES ONLY!!!
  * 
  * Plays SOS in morse code on repeat (...---...)
  * 
  * Written by Jotham Gates
- * Last modified 01/07/2022
+ * Last modified 08/07/2022
  */
 
 #include "extensionsManager.h"
@@ -33,10 +33,8 @@ class SosExtension: public Extension {
         void sosMode() {
             // Setup
             Serial.println(F("Playing SOS!!!"));
-            tune.stop();
             startBoost();
-            flashLoader.setTune(const_cast<uint16_t*>(sosTune));
-            tune.play();
+            uiBeep(const_cast<uint16_t*>(sosTune));
             
             // Wait for button press
             while (true) {
@@ -55,8 +53,6 @@ class SosExtension: public Extension {
 
             // Shut down
             Serial.println(F("Stopping SOS!!!"));
-            tune.stop();
-            curTune = 0; // Reset to known state (in case warble mode below).
-            flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
+            revertToTune();
         }
 };

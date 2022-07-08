@@ -6,7 +6,7 @@
  * extension for maintainability.
  * 
  * Written by Jotham Gates
- * Last modified 02/07/2022
+ * Last modified 08/07/2022
  */
 
 #include "extensionsManager.h"
@@ -74,6 +74,7 @@ class RunTimeLogger: public Extension {
         /** Resets stored data to 0 */
         inline void resetEEPROM() {
             Serial.println(F("Wiping run times"));
+            uiBeep(const_cast<uint16_t*>(beeps::error));
             EEPROMwl.put(0, (uint32_t)0);
             EEPROMwl.put(1, (uint16_t)0);
         }

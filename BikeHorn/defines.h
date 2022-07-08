@@ -65,3 +65,4 @@
  */
 #define WELCOME_MSG "Bike horn V" VERSION " started. Compiled " __TIME__ ", " __DATE__
 #define MANUAL_CUTOFF // Allow notes to be stopped as we aren't using tone() to make the noises.
+#define ENABLE_CALLBACKS

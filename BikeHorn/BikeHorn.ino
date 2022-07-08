@@ -36,8 +36,12 @@
     #define WATCHDOG_RESET
 #endif
 
-uint32_t modeButtonPress(); // Prototypes so that the extension manager is happy
+// Prototypes so that the extension manager is happy
+void uiBeep(uint16_t* beep);
+void revertToTune();
+uint32_t modeButtonPress();
 void startBoost();
+inline void stopBoost();
 
 #include "tunes.h"
 #include "optimisations.h"
@@ -67,28 +71,27 @@ void setup() {
     Serial.print(tuneCount);
     Serial.println(F(" tunes installed"));
 
-    // Extensions
-    extensionManager.callOnStart();
-
     // Tune Player
     flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
     tune.begin(&flashLoader, &piezo);
     tune.spool();
 
+    // Extensions
+    extensionManager.callOnStart();
+
 #ifdef ENABLE_WARBLE
     /// Warble mode
     warble.begin(&piezo, WARBLE_LOWER, WARBLE_UPPER, WARBLE_RISE, WARBLE_FALL);
 #endif
-
-    // Go to midi synth mode if change mode and horn button pressed or reset the eeprom.
-    if(!digitalRead(BUTTON_MODE)) {
-        midiSynth();
-    }
 }
 
 void loop() {
     // Go to sleep if not pressed and wake up when a button is pressed
     if(digitalRead(BUTTON_HORN)) {
+        // Wait for tune (beep) to finish before sleeping.
+        while(tune.isPlaying()) {
+            tune.update();
+        }
         Serial.println(F("Going to sleep"));
         extensionManager.callOnSleep();
         sleepGPIO();
@@ -113,7 +116,6 @@ void loop() {
         extensionManager.callOnTuneStart();
         // Start playing
         startBoost();
-
 #ifdef ENABLE_WARBLE
         if(curTune != tuneCount) {
             // Normal tune playing mode
@@ -221,8 +223,7 @@ void sleepGPIO() {
     // Shut down timers to release pins
     TCCR1A = 0;
     TCCR1B = 0;
-    TCCR2A = 0;
-    TCCR2B = 0;
+    stopBoost();
 
     // Shutdown serial so it won't be affected by playing with the io lines
     Serial.end();
@@ -283,58 +284,13 @@ void startBoost() {
     OCR2A = IDLE_DUTY; // Enough duty cycle to keep the voltage on the second stage at a reasonable level.
 }
 
-/** Mode for a midi synth. This is blocking and will only exit on reset or if the horn button is pressed. */
-void midiSynth() {
-    // Flashing lights to warn of being in this mode
-    digitalWrite(LED_BUILTIN, LOW);
-    digitalWrite(LED_EXTERNAL, HIGH);
-
-    startBoost();
-    uint8_t currentNote;
-
-    while(digitalRead(BUTTON_HORN)) {
-        WATCHDOG_RESET;
-        uint8_t incomingNote; // The next byte to be read off the serial buffer.
-        uint8_t midiPitch; // The MIDI note number.
-        uint8_t midiVelocity; //The velocity of the note.
-
-        incomingNote = getByte();
-        // Analyse the byte. The byte at this stage should be a status byte. If it isn't, the byte is ignored.
-        switch (incomingNote) {
-            case B10010000 | MIDI_CHANNEL: // Note on
-            midiPitch = getByte();
-            if(midiPitch != -1) {
-                midiVelocity = getByte();
-                if(midiVelocity != -1) {
-                    piezo.playMidiNote(midiPitch); // This will handle the conversion into note and octave.
-                    digitalWrite(LED_BUILTIN, HIGH);
-                    digitalWrite(LED_EXTERNAL, LOW);
-                    currentNote = midiPitch;
-                }
-            }
-            break;
-
-            case B10000000 | MIDI_CHANNEL: // Note off
-            midiPitch = getByte();
-            if(midiPitch == currentNote) {
-                piezo.stopSound();
-                digitalWrite(LED_BUILTIN, LOW);
-                digitalWrite(LED_EXTERNAL, HIGH);
-            }
-            break;
-        }
-    }
-    piezo.stopSound();
-    digitalWrite(LED_BUILTIN, LOW);
-    digitalWrite(LED_EXTERNAL, LOW);
-}
-
-/** Wait for an incoming note and return the note. */
-byte getByte() {
-    while (!Serial.available() && digitalRead(BUTTON_HORN)) {
-        WATCHDOG_RESET;
-    } //Wait while there are no bytes to read in the buffer.
-    return Serial.read();
+/**
+ * @brief Stops timer 2, which controls the boost stage.
+ * 
+ */
+inline void stopBoost() {
+    TCCR2A = 0;
+    TCCR2B = 0;
 }
 
 /**
@@ -361,4 +317,35 @@ uint32_t modeButtonPress() {
         }
     }
     return millis() - pressTime;
+}
+
+/**
+ * @brief Stores the current tune, then starts playing a beep / other tune.
+ * When this is finished, the original tune will be restored.
+ * 
+ * @param beep the new tune.
+ */
+void uiBeep(uint16_t* beep) {
+    tune.stop();
+    tune.setCallOnStop(revertToTune);
+    tune.play();
+}
+
+/**
+ * @brief Reverts the current tune to the selected one.
+ * 
+ */
+void revertToTune() {
+    tune.setCallOnStop(NULL);
+    tune.stop();
+    // If in warble, mode, don't do anything as the flashLoader object isn't used for that and will be set before next use.
+#ifdef ENABLE_WARBLE
+    if(curTune != tuneCount) {
+        // Normal tune playing mode
+        flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
+        tune.spool();
+    }
+#else
+    flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
+#endif
 }
