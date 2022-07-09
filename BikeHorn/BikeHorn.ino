@@ -328,6 +328,7 @@ uint32_t modeButtonPress() {
 void uiBeep(uint16_t* beep) {
     tune.stop();
     tune.setCallOnStop(revertToTune);
+    flashLoader.setTune(beep);
     tune.play();
 }
 

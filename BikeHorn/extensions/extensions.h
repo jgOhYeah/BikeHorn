@@ -24,7 +24,7 @@ SosExtension sosExtension;
 MidiSynthExtension midiSynth;
 
 // Array of extensions. This will be the order they appear in the menu if they have menu items.
-Extension* extensionsArray[] = {
+Extension* extensionsList[] = {
     // &exampleExtension,
     &sosExtension,
 #ifdef LOG_RUN_TIME
@@ -34,5 +34,5 @@ Extension* extensionsArray[] = {
 };
 
 // Setting up the extensions manager
-const uint8_t extensionsCount = sizeof(extensionsArray) / sizeof(Extension*);
-ExtensionManager extensionManager(extensionsArray, extensionsCount);
+Array<Extension*> extensionsArray = {extensionsList, sizeof(extensionsList) / sizeof(Extension*)};
+ExtensionManager extensionManager(extensionsArray);

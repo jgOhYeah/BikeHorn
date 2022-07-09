@@ -73,7 +73,7 @@ namespace beeps {
  */
 class ExtensionManager {
     public:
-        ExtensionManager(Extension* extensionsArray[], const uint8_t extensionsCount) : extensions(extensionsArray), count{extensionsCount} {}
+        ExtensionManager(Array<Extension*>& extensionsArray) : extensions(extensionsArray) {}
 
         /**
          * @brief Calls all extensions on startup.
@@ -81,10 +81,10 @@ class ExtensionManager {
          */
         void callOnStart() {
             Serial.print(F("There are "));
-            Serial.print(count);
+            Serial.print(extensions.length);
             Serial.println(F(" extensions installed"));
-            for (uint8_t i = 0; i < count; i++) {
-                extensions[i]->onStart();
+            for (uint8_t i = 0; i < extensions.length; i++) {
+                extensions.array[i]->onStart();
             }
         }
 
@@ -93,8 +93,8 @@ class ExtensionManager {
          * 
          */
         void callOnWake() {
-            for (uint8_t i = 0; i < count; i++) {
-                extensions[i]->onWake();
+            for (uint8_t i = 0; i < extensions.length; i++) {
+                extensions.array[i]->onWake();
             }
         }
 
@@ -103,8 +103,8 @@ class ExtensionManager {
          * 
          */
         void callOnSleep() {
-            for (uint8_t i = 0; i < count; i++) {
-                extensions[i]->onSleep();
+            for (uint8_t i = 0; i < extensions.length; i++) {
+                extensions.array[i]->onSleep();
             }
         }
 
@@ -113,8 +113,8 @@ class ExtensionManager {
          * 
          */
         void callOnTuneStart() {
-            for (uint8_t i = 0; i < count; i++) {
-                extensions[i]->onTuneStart();
+            for (uint8_t i = 0; i < extensions.length; i++) {
+                extensions.array[i]->onTuneStart();
             }
         }
 
@@ -123,8 +123,8 @@ class ExtensionManager {
          * 
          */
         void callOnTuneStop() {
-            for (uint8_t i = 0; i < count; i++) {
-                extensions[i]->onTuneStop();
+            for (uint8_t i = 0; i < extensions.length; i++) {
+                extensions.array[i]->onTuneStop();
             }
         }
 
@@ -179,8 +179,7 @@ class ExtensionManager {
         }
 
     private:
-        Extension** extensions;
-        const uint8_t count;
+        Array<Extension*>& extensions;
 
         /**
          * @brief Calculates and returns the number of items in the menu.
@@ -189,8 +188,8 @@ class ExtensionManager {
          */
         uint8_t countMenuItems() {
             uint8_t items = 0;
-            for (uint8_t i = 0; i < count; i++) {
-                items += extensions[i]->menuActions.length;
+            for (uint8_t i = 0; i < extensions.length; i++) {
+                items += extensions.array[i]->menuActions.length;
             }
             return items;
         }
@@ -204,11 +203,11 @@ class ExtensionManager {
             // Convert the menu index into an extension and index in the extension.
             uint8_t current = 0;
             uint8_t extension = 0;
-            uint8_t next = current + extensions[extension]->menuActions.length;
+            uint8_t next = current + extensions.array[extension]->menuActions.length;
             while (index >= next) {
                 current = next;
                 extension++;
-                next = current + extensions[extension]->menuActions.length;
+                next = current + extensions.array[extension]->menuActions.length;
             }
             uint8_t extensionIndex = index - current;
 
@@ -219,6 +218,6 @@ class ExtensionManager {
             Serial.print(extension);
             Serial.print(F(" that appeared in the menu as item "));
             Serial.println(index);
-            extensions[extension]->menuActions.array[extensionIndex]();
+            extensions.array[extension]->menuActions.array[extensionIndex]();
         }
 };
