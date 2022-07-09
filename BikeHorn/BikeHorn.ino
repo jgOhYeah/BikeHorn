@@ -5,7 +5,7 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 01/07/2022
+ * Last modified 09/07/2022
  * 
  * Requires these libraries (can be installed through the library manager):
  *   - Low-Power (https://github.com/rocketscream/Low-Power) - Shuts things down to save power.
@@ -91,6 +91,12 @@ void loop() {
         // Wait for tune (beep) to finish before sleeping.
         while(tune.isPlaying()) {
             tune.update();
+            WATCHDOG_RESET;
+            if (!digitalRead(BUTTON_HORN)) {
+                // On rare occasions when the button is pressed during a beep, go to sleep and wake up again quickly.
+                tune.stop();
+                break;
+            }
         }
         Serial.println(F("Going to sleep"));
         extensionManager.callOnSleep();
@@ -133,8 +139,9 @@ void loop() {
         bool ledState = true;
 
         uint32_t startTime = millis();
-        uint32_t curTime = startTime;
-        while (curTime - startTime < DEBOUNCE_TIME) {
+        uint32_t curTime;
+        uint32_t ledStart = startTime;
+        do {
             WATCHDOG_RESET;
 
 #ifdef ENABLE_WARBLE
@@ -150,7 +157,6 @@ void loop() {
 #endif
 
             // Flash the LED every so often
-            static uint32_t ledStart = curTime;
             if(curTime - ledStart > 125) {
                 ledStart = curTime;
                 digitalWrite(LED_EXTERNAL, !ledState);
@@ -162,8 +168,22 @@ void loop() {
                 startTime = curTime;
             }
             curTime = millis();
+        } while (curTime - startTime < DEBOUNCE_TIME);
+
+        // Stop playing the tune
+#ifdef ENABLE_WARBLE
+        if(curTune != tuneCount) {
+            tune.stop();
+            tune.spool();
+        } else {
+            warble.stop();
         }
+#else
+        tune.stop();
+        tune.spool();
+#endif
         extensionManager.callOnTuneStop();
+
     } else {
         // Change tune as the other button is pressed
         digitalWrite(LED_EXTERNAL, HIGH);
@@ -189,11 +209,14 @@ void loop() {
                 Serial.print(F("Changing to tune "));
                 Serial.println(curTune);
                 flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
+
+                // Stop tune and setup for the next time
+                tune.stop();
+                tune.spool();
 #ifdef ENABLE_WARBLE
             } else {
                 // Don't do anything here and select on the fly
                 Serial.println(F("Changing to warble mode"));
-
             }
 #endif
         } else {
@@ -201,19 +224,6 @@ void loop() {
             extensionManager.displayMenu();
         }
     }
-
-    // Stop tune and setup for the next time
-#ifdef ENABLE_WARBLE
-    if(curTune != tuneCount) {
-        tune.stop();
-        tune.spool();
-    } else {
-        warble.stop();
-    }
-#else
-    tune.stop();
-    tune.spool();
-#endif
 }
 
 /**

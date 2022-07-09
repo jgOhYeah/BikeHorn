@@ -23,6 +23,9 @@ SosExtension sosExtension;
 #include "midiSynth.h"
 MidiSynthExtension midiSynth;
 
+#include "measureBattery.h"
+MeasureBatteryExtension measureBattery;
+
 // Array of extensions. This will be the order they appear in the menu if they have menu items.
 Extension* extensionsList[] = {
     // &exampleExtension,
@@ -30,7 +33,8 @@ Extension* extensionsList[] = {
 #ifdef LOG_RUN_TIME
     &runTimeLogger,
 #endif
-    &midiSynth
+    &midiSynth,
+    &measureBattery
 };
 
 // Setting up the extensions manager

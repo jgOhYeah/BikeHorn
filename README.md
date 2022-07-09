@@ -17,3 +17,6 @@ See the Silicon Chip section or the [Images directory](Images) for relevent diag
 
 A low resolution gif that gives an idea of order of assembly:  
 ![AssemblyGIF.gif](Images/AssemblyGIF.gif)
+
+## Extensions
+I have attempted to make the firmware fairly modular and most non-core parts have been included as externsions. This allows for easier maintenance and customisation. For more details on enabling, disabling and writing extensions, please see the [extensions documentation](Extensions.md).

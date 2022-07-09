@@ -5,7 +5,7 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 07/03/2022
+ * Last modified 09/07/2022
  */
  
 #define VERSION "1.4.0a"
@@ -66,3 +66,4 @@
 #define WELCOME_MSG "Bike horn V" VERSION " started. Compiled " __TIME__ ", " __DATE__
 #define MANUAL_CUTOFF // Allow notes to be stopped as we aren't using tone() to make the noises.
 #define ENABLE_CALLBACKS
+#define DEFAULT_TEMPO 120 // UI beeps
