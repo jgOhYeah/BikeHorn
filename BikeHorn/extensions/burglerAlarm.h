@@ -36,3 +36,13 @@ void burglerAlarmSound() {
     Sound
     if 2 minutes up or key code entered correctly, go back to burgler alarm mode.*/
 }
+#include "extensionsManager.h"
+
+class BurglerAlarmExtension : public Extension {
+    public:
+
+        void monitor() {
+            LowPower.powerDown(SLEEP_120MS, ADC_OFF, BOD_OFF);
+        }
+    private:
+};

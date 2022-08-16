@@ -26,6 +26,9 @@ MidiSynthExtension midiSynth;
 #include "measureBattery.h"
 MeasureBatteryExtension measureBattery;
 
+#include "burglerAlarm.h"
+BurglerAlarmExtension burglerAlarm;
+
 // Array of extensions. This will be the order they appear in the menu if they have menu items.
 Extension* extensionsList[] = {
     // &exampleExtension,
@@ -34,7 +37,8 @@ Extension* extensionsList[] = {
     &runTimeLogger,
 #endif
     &midiSynth,
-    &measureBattery
+    &measureBattery,
+    &burglerAlarm
 };
 
 // Setting up the extensions manager

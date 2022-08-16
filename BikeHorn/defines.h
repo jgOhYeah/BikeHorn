@@ -60,6 +60,16 @@
 #define MENU_TIMEOUT 30000
 
 /**
+ * @brief Accelerometer
+ * 
+ */
+#define ACCEL_INSTALLED
+#define ACCEL_X_PIN A4
+#define ACCEL_Y_PIN A3
+#define ACCEL_Z_PIN A2
+#define ACCEL_POWER_PIN A5
+#define ACCEL_PINS 0b00111100 // Bit map of the above
+/**
  * @brief Other defines
  * 
  */

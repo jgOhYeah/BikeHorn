@@ -51,6 +51,7 @@ FlashTuneLoader flashLoader;
 BikeHornSound piezo;
 TunePlayer tune;
 uint8_t curTune = 0;
+period_t sleepTime = SLEEP_FOREVER;
 
 #ifdef ENABLE_WARBLE
 Warble warble;
@@ -101,11 +102,12 @@ void loop() {
         Serial.println(F("Going to sleep"));
         extensionManager.callOnSleep();
         sleepGPIO();
+        wakePin = none;
         // Set interrupts to wake the processor up again when required
         attachInterrupt(digitalPinToInterrupt(BUTTON_HORN), wakeUpHornISR, LOW);
         attachInterrupt(digitalPinToInterrupt(BUTTON_MODE), wakeUpModeISR, LOW);
         WATCHDOG_DISABLE;
-        LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF); // The horn will spend most of its life here
+        LowPower.powerDown(sleepTime, ADC_OFF, BOD_OFF); // The horn will spend most of its life here
         detachInterrupt(digitalPinToInterrupt(BUTTON_HORN));
         detachInterrupt(digitalPinToInterrupt(BUTTON_MODE));
         WATCHDOG_ENABLE;
@@ -184,7 +186,7 @@ void loop() {
 #endif
         extensionManager.callOnTuneStop();
 
-    } else {
+    } else if (wakePin == mode) {
         // Change tune as the other button is pressed
         digitalWrite(LED_EXTERNAL, HIGH);
 
@@ -240,12 +242,17 @@ void sleepGPIO() {
 
     // Using registers so everything can be done at once easily.
     DDRB = (1 << PB1) | (1 << PB3); // Set everything except pwm to input pullup
+#ifdef ACCEL_INSTALLED
+    DDRC = ACCEL_PINS;
+    PORTC = ~ACCEL_PINS; // Pull up inputs, set outputs as low.
+#else
     DDRC = 0;
+    PORTC = 0xff;
+#endif
 
     // Pull all unused pins high to avoid floating and reduce power.
     DDRD = 0x03; // Set serial as an output to tie low
     PORTB = ~((1 << PB1) | (1 << PB3));
-    PORTC = 0xff;
     PORTD = 0xfc; // Don't pull the serial pins high
     
     // Keep as outputs
