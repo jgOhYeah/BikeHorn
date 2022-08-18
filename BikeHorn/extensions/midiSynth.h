@@ -15,7 +15,7 @@ class MidiSynthExtension: public Extension {
     public:
         void onStart() {
             // Go to midi synth mode if change mode pressed or reset the eeprom.
-            if(!digitalRead(BUTTON_MODE)) {
+            if(IS_PRESSED(BUTTON_MODE)) {
                 midiSynth();
             }
         }
@@ -31,7 +31,7 @@ class MidiSynthExtension: public Extension {
             startBoost();
             uint8_t currentNote;
 
-            while(digitalRead(BUTTON_HORN)) {
+            while(!IS_PRESSED(BUTTON_HORN)) {
                 WATCHDOG_RESET;
                 uint8_t incomingNote; // The next byte to be read off the serial buffer.
                 uint8_t midiPitch; // The MIDI note number.
@@ -70,7 +70,7 @@ class MidiSynthExtension: public Extension {
 
         /** Wait for an incoming note and return the note. */
         byte getByte() {
-            while (!Serial.available() && digitalRead(BUTTON_HORN)) {
+            while (!Serial.available() && !IS_PRESSED(BUTTON_HORN)) {
                 WATCHDOG_RESET;
             } //Wait while there are no bytes to read in the buffer.
             return Serial.read();

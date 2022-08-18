@@ -88,12 +88,12 @@ void setup() {
 
 void loop() {
     // Go to sleep if not pressed and wake up when a button is pressed
-    if(digitalRead(BUTTON_HORN)) {
+    if(!IS_PRESSED(BUTTON_HORN)) {
         // Wait for tune (beep) to finish before sleeping.
         while(tune.isPlaying()) {
             tune.update();
             WATCHDOG_RESET;
-            if (!digitalRead(BUTTON_HORN)) {
+            if (IS_PRESSED(BUTTON_HORN)) {
                 // On rare occasions when the button is pressed during a beep, go to sleep and wake up again quickly.
                 tune.stop();
                 break;
@@ -166,7 +166,7 @@ void loop() {
             }
 
             // Check if the button is pressed and reset the time if it is.
-            if(!digitalRead(BUTTON_HORN)) {
+            if(IS_PRESSED(BUTTON_HORN)) {
                 startTime = curTime;
             }
             curTime = millis();
@@ -323,12 +323,12 @@ uint32_t modeButtonPress() {
     while(millis() - debounceTime < DEBOUNCE_TIME) {
         WATCHDOG_RESET;
         tune.update();
-        if(!digitalRead(BUTTON_MODE)) {
+        if(IS_PRESSED(BUTTON_MODE)) {
             debounceTime = millis();
         }
 
         // If the horn button is pressed, exit immediately to start playing a tune.
-        if(!digitalRead(BUTTON_HORN)) {
+        if(IS_PRESSED(BUTTON_HORN)) {
             wakePin = horn;
             return 1;
         }

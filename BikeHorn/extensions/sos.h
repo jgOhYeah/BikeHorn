@@ -39,7 +39,7 @@ class SosExtension: public Extension {
             // Wait for button press
             while (true) {
                 WATCHDOG_RESET;
-                if (!digitalRead(BUTTON_MODE)) {
+                if (IS_PRESSED(BUTTON_MODE)) {
                     digitalWrite(LED_EXTERNAL, LOW);
                     uint32_t pressTime = modeButtonPress();
                     digitalWrite(LED_EXTERNAL, HIGH);

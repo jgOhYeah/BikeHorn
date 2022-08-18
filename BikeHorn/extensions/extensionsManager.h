@@ -145,7 +145,7 @@ class ExtensionManager {
                 while (millis() - lastInteractionTime < MENU_TIMEOUT) {
                     WATCHDOG_RESET;
                     tune.update();
-                    if (!digitalRead(BUTTON_MODE)) {
+                    if (IS_PRESSED(BUTTON_MODE)) {
                         digitalWrite(LED_EXTERNAL, LOW);
                         uint32_t pressTime = modeButtonPress();
                         digitalWrite(LED_EXTERNAL, HIGH);
@@ -167,7 +167,7 @@ class ExtensionManager {
                             return;
                         }
                     }
-                    if (!digitalRead(BUTTON_HORN)) {
+                    if (IS_PRESSED(BUTTON_HORN)) {
                         tune.stop(); // Cancel the beep if needed.
                         return;
                     }

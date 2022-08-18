@@ -69,6 +69,7 @@
 #define ACCEL_Z_PIN A2
 #define ACCEL_POWER_PIN A5
 #define ACCEL_PINS 0b00111100 // Bit map of the above
+
 /**
  * @brief Other defines
  * 
@@ -77,3 +78,4 @@
 #define MANUAL_CUTOFF // Allow notes to be stopped as we aren't using tone() to make the noises.
 #define ENABLE_CALLBACKS
 #define DEFAULT_TEMPO 120 // UI beeps
+#define IS_PRESSED(PIN) !digitalRead(PIN) // Macro to make things a little clearer
