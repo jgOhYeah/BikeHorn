@@ -58,8 +58,8 @@ Warble warble;
 #endif
 
 // Stores which pin was responsible for waking the system up.
-enum WakePin {none, horn, mode};
-volatile WakePin wakePin;
+enum Buttons {NONE, HORN, MODE};
+volatile Buttons wakePin;
 
 #include "extensions/extensions.h"
 
@@ -102,7 +102,7 @@ void loop() {
         Serial.println(F("Going to sleep"));
         extensionManager.callOnSleep();
         sleepGPIO();
-        wakePin = none;
+        wakePin = NONE;
         // Set interrupts to wake the processor up again when required
         attachInterrupt(digitalPinToInterrupt(BUTTON_HORN), wakeUpHornISR, LOW);
         attachInterrupt(digitalPinToInterrupt(BUTTON_MODE), wakeUpModeISR, LOW);
@@ -115,11 +115,11 @@ void loop() {
         Serial.println(F("Waking up"));
         extensionManager.callOnWake();
     } else {
-        wakePin = horn;
+        wakePin = HORN;
     }
 
     // If we got here, a button was pressed
-    if(wakePin == horn) {
+    if(wakePin == HORN) {
         // Play a tune
         extensionManager.callOnTuneStart();
         // Start playing
@@ -186,7 +186,7 @@ void loop() {
 #endif
         extensionManager.callOnTuneStop();
 
-    } else if (wakePin == mode) {
+    } else if (wakePin == MODE) {
         // Change tune as the other button is pressed
         digitalWrite(LED_EXTERNAL, HIGH);
 
@@ -279,14 +279,14 @@ void wakeGPIO() {
  * Interrupt Service Routine (ISR) called when the hirn wakes up with the horn button pressed.
  */
 void wakeUpHornISR() {
-    wakePin = horn;
+    wakePin = HORN;
 }
 
 /**
  * Interrupt Service Routine (ISR) called when the hirn wakes up with the mode button pressed.
  */
 void wakeUpModeISR() {
-    wakePin = mode;
+    wakePin = MODE;
 }
 
 /**
@@ -329,7 +329,7 @@ uint32_t modeButtonPress() {
 
         // If the horn button is pressed, exit immediately to start playing a tune.
         if(IS_PRESSED(BUTTON_HORN)) {
-            wakePin = horn;
+            wakePin = HORN;
             return 1;
         }
     }

@@ -4,38 +4,9 @@
  * movement is detected.
  * 
  * Written by Jotham Gates
- * Last modified 01/07/2022
+ * Last modified 21/08/2022
  */
 
-/**
- * @brief Alarm mode
- */
-void burglerAlarmMode() {
-    // TODO: Implement
-    /*
-    recharge_time = 60 seconds
-    max_count = 3
-    Movement count = max_count
-    while true:
-        Turn accelerometer on
-        Take reading
-        Use fancy algorithm to compare reading with previous and check if moved significantly.
-        If moved significantly:
-            decrement movement count
-            if count > 0:
-                Set off warning beep
-            else:
-                Go into alarm mode
-    */
-
-}
-
-void burglerAlarmSound() {
-    // TODO: Implement
-    /*
-    Sound
-    if 2 minutes up or key code entered correctly, go back to burgler alarm mode.*/
-}
 #include "extensionsManager.h"
 
 #define SLEEP_SKIP 255
@@ -45,64 +16,66 @@ class BurglerAlarmExtension : public Extension {
 
         void monitor() {
             // LowPower.powerDown(SLEEP_120MS, ADC_OFF, BOD_OFF);
-            AlarmState state = Init;
+            AlarmState state = INIT;
             uint16_t iterationsRemaining = 40;
             while (true) {
                 switch(state) {
-                    case Init:
+                    case INIT:
                         // Fill up the buffers and go to Low Power
                         takeReading();
                         sleepTime = SLEEP_60MS;
                         iterationsRemaining--;
                         if(!iterationsRemaining) {
-                            state = Sleep;
+                            state = SLEEP;
                         }
                         break;
                     
-                    case Sleep:
-                        // Long sleeps between checks, go to Awake when detected.
+                    case SLEEP:
+                        // Long sleeps between checks, go to AWAKE when detected.
                         // TODO: GPIO
                         if(takeReading()) {
-                            state = Awake;
+                            state = AWAKE;
                             iterationsRemaining = 40;
                         }
                         sleepTime = SLEEP_4S;
                         break;
 
-                    case Awake:
-                        // Shorter sleeps between checks, keep accelerometer on. Beep and go to Alert when detected.
+                    case AWAKE:
+                        // Shorter sleeps between checks, keep accelerometer on. Beep and go to ALERT when detected.
                         sleepTime = SLEEP_120MS;
 
                         iterationsRemaining--; // Nothing happened for a while
                         if(!iterationsRemaining) {
-                            state = Sleep;
+                            state = SLEEP;
                         }
                         if(takeReading()) {
-                            state = Alert;
+                            state = ALERT;
                             iterationsRemaining = 40;
                         }
                         break;
                     
-                    case Alert:
-                        // Same as awake, go to Countdown when detected.
+                    case ALERT:
+                        // Same as awake, go to COUNTDOWN when detected.
                         sleepTime = SLEEP_120MS;
                         iterationsRemaining--; // Nothing happened for a while
                         if(!iterationsRemaining) {
-                            state = Sleep;
+                            state = SLEEP;
                         }
                         if(takeReading()) {
-                            state = Countdown;
+                            state = COUNTDOWN;
                         }
                         break;
                     
-                    case Countdown:
+                    case COUNTDOWN:
                         // Give 10s to enter code. If successful, return. Else go to siren.
                         // TODO:
-                        state = Siren;
+                        state = SIREN;
                         break;
 
-                    default: // Siren
+                    default: // SIREN
                         // Noise. If button is pressed, go to countdown while still making noise.
+                        // TODO
+                        Serial.println("Siren");
                 }
                 if (sleepTime != SLEEP_SKIP) {
                     LowPower.powerDown(sleepTime, ADC_OFF, BOD_OFF); // The horn will spend most of its life here
@@ -119,10 +92,16 @@ class BurglerAlarmExtension : public Extension {
          * @brief What state the alarm is in.
          * 
          */
-        enum AlarmState {Init, Sleep, Awake, Alert, Countdown, Siren};
+        enum AlarmState {INIT, SLEEP, AWAKE, ALERT, COUNTDOWN, SIREN};
 
 };
 
+#define ENCODE_CODE(CODE, LENGTH) (CODE<<4 | LENGTH)
+
+/**
+ * @brief Class for entering a pin code.
+ * 
+ */
 class CodeEntry {
     public:
         /**
@@ -134,7 +113,23 @@ class CodeEntry {
          * 
          * @param code the code to accept as a 16 bit binary number.
          */
-        CodeEntry(const uint16_t code) : m_code(code) {}
+        CodeEntry(const uint16_t code) : m_code(code) {
+            start();
+        }
+
+        /**
+         * @brief Construct a new Code Entry object.
+         * 
+         * The code is formatted as a 16 bit binary number. The lowest 4 bits store the number of
+         * characters in the code. The remaining upper 12 bits store the characters (0 is the mode
+         * button being pressed, 1 is horn button being pressed).
+         * 
+         * @param pin the pin to accept (%1010 is horn, mode, horn, mode).
+         * @param length the number of digits.
+         */
+        CodeEntry(const uint16_t pin, const uint8_t length) : m_code(ENCODE_CODE(pin, length)) {
+            start();
+        }
 
         /**
          * @brief Resets code entry so that a new attempt at the code can be entered.
@@ -143,8 +138,7 @@ class CodeEntry {
         void start() {
             m_charsLeft = m_code & 0xf;
             m_inputted = 0;
-            m_lastPressed = none;
-            m_lastPressTime = millis();
+            m_lastPressedTime = millis();
         }
 
         /**
@@ -155,33 +149,37 @@ class CodeEntry {
          * @return false if not enough characters have been obtained.
          */
         bool add(bool character) {
-            if(m_charsLeft != 0) {
-                m_inputted |= character << 15;
-                m_inputted >>= 1;
-                m_charsLeft--;
+            m_charsLeft--;
+            if(m_charsLeft >= 0) {
+                m_inputted |= character << m_charsLeft;
                 return m_charsLeft == 0;
             }
+            return true;
         }
         
+        /**
+         * @brief Checks the buttons and inputs characters (horn is true, mode is false).
+         * 
+         * @return true if enough characters have been obtained.
+         * @return false is not enough characters have been obtained.
+         */
         bool update() {
             uint32_t curTime = millis();
-            if(curTime - m_lastPressTime > DEBOUNCE_TIME) {
-                // It is safe to assume a change now means a button has been pressed or released.
-                WakePin curButton; // TODO: Rename to somethign more generic.
+            if(curTime - m_lastPressedTime > DEBOUNCE_TIME) {
+                // A Button hasn't been pressed for a while.
                 if (IS_PRESSED(BUTTON_HORN)) {
-                    curButton = horn;
+                    m_lastPressedTime = curTime;
+                    return add(true);
                 } else if(IS_PRESSED(BUTTON_MODE)) {
-                    curButton = mode;
-                } else {
-                    curButton = none;
+                    m_lastPressedTime = curTime;
+                    return add(false);
                 }
 
-                if (curButton != m_lastPressed) {
-                    m_lastPressTime = curTime;
-                } // TODO: Add
-            } else {
-                // TODO: Not update
+            } else if(IS_PRESSED(BUTTON_MODE) || IS_PRESSED(BUTTON_HORN)) {
+                // A button is currently pressed
+                m_lastPressedTime = curTime;
             }
+            return false;
         }
 
         /**
@@ -190,13 +188,12 @@ class CodeEntry {
          * 
          */
         bool check() {
-            return m_code & ~0xf == m_inputted;
+            return (m_code & ~0xf) == (m_inputted << 4);
         }
 
     private:
         const uint16_t m_code;
         int8_t m_charsLeft;
         uint16_t m_inputted;
-        WakePin m_lastPressed;
-        uint32_t m_lastPressTime;
+        uint32_t m_lastPressedTime;
 };
