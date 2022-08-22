@@ -4,12 +4,15 @@
  * movement is detected.
  * 
  * Written by Jotham Gates
- * Last modified 21/08/2022
+ * Last modified 22/08/2022
  */
 
 #include "extensionsManager.h"
 
 #define SLEEP_SKIP 255
+#define ENCODE_CODE(CODE, LENGTH) (CODE<<4 | LENGTH)
+
+#define MY_CODE ENCODE_CODE(0b1001011, 7)
 
 class BurglerAlarmExtension : public Extension {
     public:
@@ -18,6 +21,8 @@ class BurglerAlarmExtension : public Extension {
             // LowPower.powerDown(SLEEP_120MS, ADC_OFF, BOD_OFF);
             AlarmState state = INIT;
             uint16_t iterationsRemaining = 40;
+            uint32_t startTime;
+            CodeEntry codeEntry(MY_CODE);
             while (true) {
                 switch(state) {
                     case INIT:
@@ -62,14 +67,29 @@ class BurglerAlarmExtension : public Extension {
                             state = SLEEP;
                         }
                         if(takeReading()) {
-                            state = COUNTDOWN;
+                            state = COUNTDOWN_ENTRY;
                         }
                         break;
-                    
+
+                    case COUNTDOWN_ENTRY:
+                        // Code that runs at the start of countdown
+                        state = COUNTDOWN;
+                        startTime = millis();
+                        iterationsRemaining = 10;
+                        codeEntry.start();
+                        break;
+
                     case COUNTDOWN:
                         // Give 10s to enter code. If successful, return. Else go to siren.
-                        // TODO:
-                        state = SIREN;
+                        if(curTune - startTime >= 1000) {
+                            // Once per second
+                            iterationsRemaining--;
+                            startTime = curTune;
+                        }
+                        if(!iterationsRemaining) {
+                            // Run out of time with no success.
+                            state = SIREN;
+                        }
                         break;
 
                     default: // SIREN
@@ -92,11 +112,9 @@ class BurglerAlarmExtension : public Extension {
          * @brief What state the alarm is in.
          * 
          */
-        enum AlarmState {INIT, SLEEP, AWAKE, ALERT, COUNTDOWN, SIREN};
+        enum AlarmState {INIT, SLEEP, AWAKE, ALERT, COUNTDOWN_ENTRY, COUNTDOWN, SIREN};
 
 };
-
-#define ENCODE_CODE(CODE, LENGTH) (CODE<<4 | LENGTH)
 
 /**
  * @brief Class for entering a pin code.
