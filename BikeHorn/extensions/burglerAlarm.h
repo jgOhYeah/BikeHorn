@@ -16,6 +16,33 @@
 
 class BurglerAlarmExtension : public Extension {
     public:
+        void stateMachine() {
+            // Create and add the states
+            StateInit init;
+            State::states.init = &init;
+            StateSleep sleep;
+            State::states.sleep = &sleep;
+            StateAwake awake;
+            State::states.awake = &awake;
+            StateAlert alert;
+            State::states.alert = &alert;
+            StateCountdown countdown;
+            State::states.countdown = &countdown;
+            StateSiren siren;
+            State::states.siren = &siren;
+
+            // Run the state machine
+            State* current = &init;
+            while (current) {
+                // Serial.println(current->name) // NOTE: For debugging?
+                current = current->enter();
+            }
+
+            // Tidy up
+            Serial.println(F("Exiting burgler alarm"));
+            // TODO: Beep?
+
+        }
 
         void monitor() {
             // LowPower.powerDown(SLEEP_120MS, ADC_OFF, BOD_OFF);
@@ -114,6 +141,77 @@ class BurglerAlarmExtension : public Extension {
          */
         enum AlarmState {INIT, SLEEP, AWAKE, ALERT, COUNTDOWN_ENTRY, COUNTDOWN, SIREN};
 
+};
+
+struct StatesList {
+    StateInit* init;
+    StateSleep* sleep;
+    StateAwake* awake;
+    StateAlert* alert;
+    StateCountdown* countdown;
+    StateSiren* siren;
+};
+
+/**
+ * @brief Class for a state in a state machine
+ * 
+ */
+class State {
+    public:
+        /**
+         * @brief Runs the state.
+         * 
+         * @return State* the next state to run. To break out of the state
+         *         machine, return nullptr.
+         */
+        virtual State* enter() {}
+
+        static StatesList states;
+};
+
+class StateInit : public State {
+    public:
+        virtual State* enter() {
+            // TODO: Fill up buffer
+            return states.sleep;
+        }
+};
+
+class StateSleep : public State {
+    public:
+        virtual State* enter() {
+            // TODO: Sleep
+            return states.awake;
+        }
+};
+
+class StateAwake : public State {
+    public:
+        virtual State* enter() {
+            // TODO
+            return states.alert;
+        }
+};
+
+class StateAlert : public State {
+    public:
+        virtual State* enter() {
+
+        }
+};
+
+class StateCountdown : public State {
+    public:
+        virtual State* enter() {
+            return nullptr; // To fall through and exit the state machine
+        }
+};
+
+class StateSiren : public State {
+    public:
+        virtual State* enter() {
+
+        }
 };
 
 /**
