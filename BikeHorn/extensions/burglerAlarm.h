@@ -34,7 +34,7 @@ class BurglerAlarmExtension : public Extension {
             // Run the state machine
             State* current = &init;
             while (current) {
-                // Serial.println(current->name) // NOTE: For debugging?
+                Serial.println(current->name); // NOTE: For debugging?
                 current = current->enter();
             }
 
@@ -165,12 +165,16 @@ class State {
          *         machine, return nullptr.
          */
         virtual State* enter() {}
-
+        const __FlashStringHelper* name;
         static StatesList states;
+    protected:
+        State(const __FlashStringHelper* name) : name(name) {}
 };
 
 class StateInit : public State {
     public:
+        StateInit(): State(F("Init")) {}
+
         virtual State* enter() {
             // TODO: Fill up buffer
             return states.sleep;
@@ -179,6 +183,8 @@ class StateInit : public State {
 
 class StateSleep : public State {
     public:
+        StateSleep(): State(F("Sleep")) {}
+
         virtual State* enter() {
             // TODO: Sleep
             return states.awake;
@@ -187,6 +193,8 @@ class StateSleep : public State {
 
 class StateAwake : public State {
     public:
+        StateAwake(): State(F("Awake")) {}
+
         virtual State* enter() {
             // TODO
             return states.alert;
@@ -195,6 +203,8 @@ class StateAwake : public State {
 
 class StateAlert : public State {
     public:
+        StateAlert(): State(F("Alert")) {}
+
         virtual State* enter() {
 
         }
@@ -202,15 +212,20 @@ class StateAlert : public State {
 
 class StateCountdown : public State {
     public:
+        StateCountdown(): State(F("Countdown")) {}
+
         virtual State* enter() {
+            // TODO
             return nullptr; // To fall through and exit the state machine
         }
 };
 
 class StateSiren : public State {
     public:
-        virtual State* enter() {
+        StateSiren(): State(F("Sirn")) {}
 
+        virtual State* enter() {
+            // TODO
         }
 };
 
