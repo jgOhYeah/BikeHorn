@@ -57,7 +57,7 @@
  * @brief User interface
  * 
  */
-#define LONG_PRESS_TIME 4000
+#define LONG_PRESS_TIME 2000
 #define MENU_TIMEOUT 30000
 
 /**

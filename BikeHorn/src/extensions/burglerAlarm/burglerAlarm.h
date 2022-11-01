@@ -18,11 +18,13 @@ struct StatesList;
 
 class BurglerAlarmExtension : public Extension {
     public:
+        BurglerAlarmExtension();
+
         void stateMachine();
 
-        void monitor();
+        // void monitor();
 
-        bool takeReading();
+        // bool takeReading();
 
     private:
         /**

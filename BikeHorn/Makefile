@@ -11,4 +11,4 @@ compile:
 	arduino-cli compile --fqbn arduino:avr:nano
 
 upload:
-	arduino-cli upload --fqbn arduino:avr:nano 
+	arduino-cli upload --fqbn arduino:avr:nano -p /dev/ttyUSB0

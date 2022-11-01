@@ -8,11 +8,11 @@ Each extension is a class that inherits the `Extension` class. This has a number
 
 ```mermaid
 classDiagram
+    ExtensionManager "1" --> "1" Array
     Extension "1" --> "1" Array
     Extension "0..*" --> "1" MenuItem
     ExtensionManager "1" --> "0..*" Extension
-    ExtensionManager "1" --> "1" Array
-
+    Extension <|-- ExampleExtension
 
     class Array~Type~ {
         <<struct>>
@@ -31,7 +31,7 @@ classDiagram
         +onSleep()
         +onTuneStart()
         +onTuneStop()
-        +Array~MenuItem~
+        +Array~MenuItem~ menuActions
     }
 
     class ExtensionManager {
@@ -42,5 +42,9 @@ classDiagram
         +callOnTuneStop()
         +displayMenu()
         -Array~Extension*~ extensions
+    }
+
+    class ExampleExtension {
+
     }
 ```
