@@ -6,6 +6,7 @@
  * 
  * Last modified 11/01/2022
  */
+#pragma once
 
 /**
  * @brief Handles the task of making the most noise possible.

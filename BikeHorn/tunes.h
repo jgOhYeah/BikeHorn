@@ -8,6 +8,7 @@
  * Written by Jotham Gates. Tunes converted from various sources.
  * Last modified 11/01/2021
  */
+#pragma once
 
 // Converted from 'WeWishYouAMerryChristmas' by TunePlayer Musescore plugin V1.8.0
 const uint16_t WeWishYouAMerryChristmas[] PROGMEM = {

@@ -5,7 +5,7 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 09/07/2022
+ * Last modified 01/11/2022
  * 
  * Requires these libraries (can be installed through the library manager):
  *   - Low-Power (https://github.com/rocketscream/Low-Power) - Shuts things down to save power.
@@ -17,24 +17,6 @@
  */
 
 #include "defines.h"
-
-// Libraries to include.
-#include <cppQueue.h>
-#include <LowPower.h>
-#include <TunePlayer.h>
-#include <EEPROM.h>
-
-// Only needed for the watchdog timer (DO NOT enable for Arduinos with the old bootloader).
-#ifdef ENABLE_WATCHDOG_TIMER
-    #include <avr/wdt.h>
-    #define WATCHDOG_ENABLE wdt_enable(WDTO_4S)
-    #define WATCHDOG_DISABLE wdt_disable()
-    #define WATCHDOG_RESET wdt_reset()
-#else
-    #define WATCHDOG_ENABLE
-    #define WATCHDOG_DISABLE
-    #define WATCHDOG_RESET
-#endif
 
 // Prototypes so that the extension manager is happy
 void uiBeep(uint16_t* beep);
@@ -54,14 +36,14 @@ uint8_t curTune = 0;
 period_t sleepTime = SLEEP_FOREVER;
 
 #ifdef ENABLE_WARBLE
-Warble warble;
+Warble warble;extern void uiBeep();
 #endif
 
 // Stores which pin was responsible for waking the system up.
 enum Buttons {NONE, HORN, MODE};
 volatile Buttons wakePin;
 
-#include "extensions/extensions.h"
+#include "src/extensions/extensions.h"
 
 void setup() {
     WATCHDOG_ENABLE;

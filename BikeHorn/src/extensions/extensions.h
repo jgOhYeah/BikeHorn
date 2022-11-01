@@ -3,9 +3,9 @@
  * configuration for which extensions are enabled.
  * 
  * Written by Jotham Gates
- * Last modified 02/07/2022
+ * Last modified 01/11/2022
  */
-
+#pragma once
 #include "extensionsManager.h"
 
 // Extension files and objects
@@ -26,7 +26,7 @@ MidiSynthExtension midiSynth;
 #include "measureBattery.h"
 MeasureBatteryExtension measureBattery;
 
-#include "burglerAlarm.h"
+#include "burglerAlarm/burglerAlarm.h"
 BurglerAlarmExtension burglerAlarm;
 
 // Array of extensions. This will be the order they appear in the menu if they have menu items.

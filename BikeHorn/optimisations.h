@@ -4,6 +4,7 @@
  * Written by Jotham Gates.
  * Last modified 11/01/2022
  */
+#pragma once
 
 /**
  * @brief Class for a single linear function as part of a piecewise function (Used for mapping duty

@@ -3,9 +3,15 @@
  * classes for extensions.
  * 
  * Written by Jotham Gates
- * Last modified 09/07/2022
+ * Last modified 01/11/2022
  */
 #pragma once
+#include "../../defines.h"
+
+// External methods and variables
+extern void uiBeep(uint16_t* beep);
+extern TunePlayer tune;
+extern uint32_t modeButtonPress();
 
 typedef void (*MenuItem)();
 

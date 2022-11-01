@@ -4,9 +4,9 @@
  * Plays SOS in morse code on repeat (...---...)
  * 
  * Written by Jotham Gates
- * Last modified 08/07/2022
+ * Last modified 01/11/2022
  */
-
+#pragma once
 #include "extensionsManager.h"
 
 const uint16_t sosTune[24] PROGMEM = {// Converted from 'sos' by TunePlayer Musescore plugin V1.8.0

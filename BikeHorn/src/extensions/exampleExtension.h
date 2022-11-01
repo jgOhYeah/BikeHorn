@@ -2,9 +2,9 @@
  * An example extension that does nothing except print to the serial console.
  * 
  * Written by Jotham Gates
- * Last modified 04/07/2022
+ * Last modified 01/11/2022
  */
-
+#pragma once
 #include "extensionsManager.h"
 
 class ExampleExtension: public Extension {

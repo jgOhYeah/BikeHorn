@@ -2,9 +2,9 @@
  * Prints the battery voltage to the console every so often.
  * 
  * Written by Jotham Gates
- * Last modified 09/07/2022
+ * Last modified 01/11/2022
  */
-
+#pragma once
 #include "extensionsManager.h"
 
 class MeasureBatteryExtension: public Extension {

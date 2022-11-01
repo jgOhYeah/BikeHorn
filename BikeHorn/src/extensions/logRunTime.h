@@ -6,9 +6,9 @@
  * extension for maintainability.
  * 
  * Written by Jotham Gates
- * Last modified 08/07/2022
+ * Last modified 01/11/2022
  */
-
+#pragma once
 #include "extensionsManager.h"
 #include <EEPROMWearLevel.h>
 

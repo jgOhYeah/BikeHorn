@@ -5,9 +5,10 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 09/07/2022
+ * Last modified 01/11/2022
  */
- 
+
+#pragma once
 #define VERSION "1.4.0a"
 
 /**
@@ -79,3 +80,25 @@
 #define ENABLE_CALLBACKS
 #define DEFAULT_TEMPO 120 // UI beeps
 #define IS_PRESSED(PIN) !digitalRead(PIN) // Macro to make things a little clearer
+
+
+/**
+ * @brief Libraries to include
+ * 
+ */
+#include <cppQueue.h>
+#include <LowPower.h>
+#include <TunePlayer.h>
+#include <EEPROM.h>
+
+// Only needed for the watchdog timer (DO NOT enable for Arduinos with the old bootloader).
+#ifdef ENABLE_WATCHDOG_TIMER
+    #include <avr/wdt.h>
+    #define WATCHDOG_ENABLE wdt_enable(WDTO_4S)
+    #define WATCHDOG_DISABLE wdt_disable()
+    #define WATCHDOG_RESET wdt_reset()
+#else
+    #define WATCHDOG_ENABLE
+    #define WATCHDOG_DISABLE
+    #define WATCHDOG_RESET
+#endif
