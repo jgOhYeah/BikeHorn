@@ -5,7 +5,7 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 01/11/2022
+ * Last modified 07/11/2022
  * 
  * Requires these libraries (can be installed through the library manager):
  *   - Low-Power (https://github.com/rocketscream/Low-Power) - Shuts things down to save power.
@@ -28,6 +28,7 @@ inline void stopBoost();
 #include "tunes.h"
 #include "optimisations.h"
 #include "soundGeneration.h"
+#include "soundGenerationStatic.h"
 
 FlashTuneLoader flashLoader;
 BikeHornSound piezo;

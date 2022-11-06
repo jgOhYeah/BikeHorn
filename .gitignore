@@ -11,3 +11,6 @@
 *.kicad_pcb-bak
 *.sch-bak
 BikeHornPCB-backups
+
+# Musescore
+.mscbackup

@@ -8,13 +8,33 @@
 #include "../../../defines.h"
 #include <Arduino.h>
 #include "../extensionsManager.h"
+#include "../../../optimisations.h"
+#include "../../../soundGeneration.h"
 
 #define SLEEP_SKIP 255
 #define ENCODE_CODE(CODE, LENGTH) (CODE<<4 | LENGTH)
+#define COUNTDOWN_TIME 20000
+#define COUNTDOWN_BEEP_INTERVAL 1000
 
 #define MY_CODE ENCODE_CODE(0b1001011, 7)
 
 struct StatesList;
+// Converted from 'AlarmCountdown' by TunePlayer Musescore plugin V1.8.1
+const uint16_t alarmCountdownTune[] PROGMEM = {
+    0xe03c, // Tempo change to 60 BPM
+    0x9608,0xc018,0xc008,
+    0xd804, // Repeat going back 4 notes, repeating 3 time(s)
+    0x9608,0xc018,0xc008,
+    0xd803, // Repeat going back 3 notes, repeating 3 time(s)
+    0x9608,0xc018,0xc008,0x9608,0xc018,0xc008,0xb608,0xc018,0xc008,
+    0xd803, // Repeat going back 3 notes, repeating 3 time(s)
+    0x0808,0xc008,
+    0xd802, // Repeat going back 2 notes, repeating 3 time(s)
+    0x0800,0xc000,0x0800,0xc000,
+    0xd804, // Repeat going back 4 notes, repeating 3 time(s)
+    0xc018,
+    0xf000 // End of tune. Stop playing.
+};
 
 class BurglerAlarmExtension : public Extension {
     public:

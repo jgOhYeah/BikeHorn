@@ -4,13 +4,15 @@
  * movement is detected.
  * 
  * Written by Jotham Gates
- * Last modified 01/11/2022
+ * Last modified 07/11/2022
  */
 
 #include "burglerAlarm.h"
 
-extern period_t sleepTime;
-extern uint8_t curTune;
+// Global variables that are accessed.
+extern TunePlayer tune;
+extern BikeHornSound piezo;
+
 StatesList State::states;
 
 BurglerAlarmExtension::BurglerAlarmExtension() {
@@ -162,25 +164,71 @@ State* StateAlert::enter() {
 }
 
 State* StateCountdown::enter() {
-    // TODO
+    // Starting code entry / countdown
     CodeEntry codeEntry(MY_CODE);
     Serial.println("Waiting for code");
-    while(!codeEntry.update()) {
+    uiBeep(const_cast<uint16_t*>(alarmCountdownTune));
+
+    // Alternate tune playing
+    SoundGenerator mute; // Does nothing
+    FlashTuneLoader alternateLoader;
+    TunePlayer alternatePlayer;
+    // Don't want to call begin to reinitialise the sound generator
+    alternateLoader.begin();
+    alternateLoader.setTune(const_cast<uint16_t*>(beeps::error));
+    alternatePlayer.tuneLoader = &alternateLoader;
+    alternatePlayer.soundGenerator = &piezo;
+
+    // Countdown
+    while (tune.isPlaying()) {
         WATCHDOG_RESET;
+        tune.update();
+        alternatePlayer.update();
+        // TODO: Flash leds or something
+
+        // Code entry
+        if(codeEntry.update()) {
+            // Had enough characters entered
+            if(codeEntry.check()) {
+                // Match
+                break;
+            } else {
+                // Fail.
+                Serial.println(F("Failed attempt"));
+                // Fail beep
+                tune.soundGenerator = &mute; // Ignore the current tune
+                alternateLoader.setTune(const_cast<uint16_t*>(beeps::error));
+                alternatePlayer.soundGenerator = &piezo; // Connect alternate player
+                alternatePlayer.play();
+
+                // Restart code entry
+                codeEntry.start();
+            }
+        }
+
+        // Reconnect countdown tune when alternate beep finished
+        if ((!alternatePlayer.isPlaying()) && (tune.soundGenerator != &piezo)) {
+        // if (alternatePlayer.isPlaying()) { // TODO: If left in, locks up
+            // Finished playing this iteration
+            alternatePlayer.stop(); // Resets the tune program counter
+            tune.soundGenerator = &piezo;
+        }
+        
     }
     if(codeEntry.check()) {
         // Code successful
         Serial.println(F("Success"));
         return nullptr; // To fall through and exit the state machine
     } else {
+        // Timed out or fail
         Serial.println(F("Fail"));
-        // Fail
         return states.siren;
     }
 }
 
 State* StateSiren::enter() {
     // TODO
+    Serial.println(F("BEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEP!"));
     return nullptr;
 }
 
