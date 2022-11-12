@@ -1,6 +1,6 @@
 # BikeHorn
 A "musical" siren for bicycles.
-<img alt="Overview photo of the horn from an angle" src="Images/Overview_NB_Small.png" width="200px" align="right">
+<img alt="Overview photo of the horn from an angle" src="Documentation/Images/Overview_NB_Small.png" width="200px" align="right">
 
 This design was published in the Circuit Notebook section of the [Februrary 2022 issue](https://www.siliconchip.com.au/Issue/2022/February) of the Silicon Chip magazine. Feel free to have a look there if you would like a nice explanation / writeup of the horn's operations and construction.
 
@@ -13,10 +13,10 @@ This design was published in the Circuit Notebook section of the [Februrary 2022
 6. Upload to the Arduino and test.
 7. Mount on bicycle / vehicle and have fun.
 
-See the Silicon Chip section or the [Images directory](Images) for relevent diagrams and images of the horn.
+See the Silicon Chip section or the [Images directory](Documentation/Images) for relevent diagrams and images of the horn.
 
 A low resolution gif that gives an idea of order of assembly:  
-![AssemblyGIF.gif](Images/AssemblyGIF.gif)
+![AssemblyGIF.gif](Documentation/Images/AssemblyGIF.gif)
 
 ## Extensions
-I have attempted to make the firmware fairly modular and most non-core parts have been included as externsions. This allows for easier maintenance and customisation. For more details on enabling, disabling and writing extensions, please see the [extensions documentation](Extensions.md).
+I have attempted to make the firmware fairly modular and most non-core parts have been included as externsions. This allows for easier maintenance and customisation. For more details on enabling, disabling and writing extensions, please see the [extensions documentation](Documentation/Extensions.md).

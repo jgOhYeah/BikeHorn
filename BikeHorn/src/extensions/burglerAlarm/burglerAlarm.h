@@ -8,8 +8,8 @@
 #include "../../../defines.h"
 #include <Arduino.h>
 #include "../extensionsManager.h"
-#include "../../../optimisations.h"
-#include "../../../soundGeneration.h"
+#include "../../optimisations.h"
+#include "../../soundGeneration.h"
 
 #define SLEEP_SKIP 255
 #define ENCODE_CODE(CODE, LENGTH) (CODE<<4 | LENGTH)

@@ -26,9 +26,9 @@ void startBoost();
 inline void stopBoost();
 
 #include "tunes.h"
-#include "optimisations.h"
-#include "soundGeneration.h"
-#include "soundGenerationStatic.h"
+#include "src/optimisations.h"
+#include "src/soundGeneration.h"
+#include "src/soundGenerationStatic.h"
 
 FlashTuneLoader flashLoader;
 BikeHornSound piezo;
