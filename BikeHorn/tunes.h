@@ -100,5 +100,20 @@ const uint16_t BlueBikeHorn[] PROGMEM = {
     0xf001 // End of tune. Restart from the beginning.
 };
 
+// Burgler alarm tune
+// Converted from 'BabyShark' by TunePlayer Musescore plugin V1.8.1
+const uint16_t babyShark[] PROGMEM = {
+    0xe0b4, // Tempo change to 180 BPM
+    0x4a38,0x6a38,0x9a18,0x9a08,0x9a00,0x9a08,0x9a08,0x9a18,0x9a08,0x9a18,
+    0x4a18,0x6a18,0x9a18,0x9a08,0x9a00,0x9a08,0x9a08,0x9a18,0x9a08,0x9a18,
+    0x4a18,0x6a18,0x9a18,0x9a08,0x9a00,0x9a08,0x9a08,0x9a18,0x9a08,0x9a18,
+    0x9a18,0x9a18,0x8a3a,0xc038,
+    0xd823, // Repeat going back 35 notes, repeating 3 time(s)
+    0x4a78,0x6a78,0x9af8,
+    0xf000 // End of tune. Stop playing.
+};
+
 const uint16_t *const tunes[] PROGMEM = {WeWishYouAMerryChristmas, auld_lang_syne_PNO_orig, rossini_william_tell, BlueBikeHorn, TakeOnMeIntroLoop, ImperialMarchPICAXE, Final_Countdown, Cantina, beep};
 const uint8_t tuneCount = sizeof(tunes) / sizeof(uint16_t);
+
+#define BURGLER_ALARM_TUNE babyShark

@@ -10,6 +10,7 @@
 #include "../extensionsManager.h"
 #include "../../optimisations.h"
 #include "../../soundGeneration.h"
+#include "../../../tunes.h"
 
 #define SLEEP_SKIP 255
 #define ENCODE_CODE(CODE, LENGTH) (CODE<<4 | LENGTH)
@@ -19,6 +20,8 @@
 #define MY_CODE ENCODE_CODE(0b1001011, 7)
 
 struct StatesList;
+class CodeEntry;
+
 // Converted from 'AlarmCountdown' by TunePlayer Musescore plugin V1.8.1
 const uint16_t alarmCountdownTune[] PROGMEM = {
     0xe03c, // Tempo change to 60 BPM
@@ -70,6 +73,7 @@ class State {
         virtual State* enter() {}
         const __FlashStringHelper* name;
         static StatesList states;
+        static CodeEntry *codeEntry;
     protected:
         State(const __FlashStringHelper* name) : name(name) {}
 };
@@ -177,6 +181,17 @@ class CodeEntry {
          * 
          */
         bool check();
+
+        /**
+         * @brief Plays a tune while the code is being inputted. Stops when the
+         * tune finishes.
+         * 
+         * @param tune The "background music" such as a countdown beep or siren
+         * @return true if the code was entered successfully
+         * @return false if the tune finished before the code was successfully
+         *         given.
+         */
+        bool playWithTune(uint16_t *background_tune);
 
     private:
         const uint16_t m_code;

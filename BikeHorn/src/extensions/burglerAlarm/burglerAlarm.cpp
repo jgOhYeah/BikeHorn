@@ -12,8 +12,11 @@
 // Global variables that are accessed.
 extern TunePlayer tune;
 extern BikeHornSound piezo;
+extern void startBoost();
+extern void stopBoost();
 
 StatesList State::states;
+CodeEntry* State::codeEntry;
 
 BurglerAlarmExtension::BurglerAlarmExtension() {
     // Add the burgler alarm function pointer to the menu
@@ -38,6 +41,10 @@ void BurglerAlarmExtension::stateMachine() {
     State::states.countdown = &countdown;
     StateSiren siren;
     State::states.siren = &siren;
+
+    // Add the unlock code
+    CodeEntry codeEntry(MY_CODE);
+    State::codeEntry = &codeEntry;
 
     // Run the state machine
     State* current = &init;
@@ -150,6 +157,7 @@ State* StateInit::enter() {
 
 State* StateSleep::enter() {
     // TODO: Sleep
+    stopBoost();
     return states.awake;
 }
 
@@ -165,57 +173,8 @@ State* StateAlert::enter() {
 
 State* StateCountdown::enter() {
     // Starting code entry / countdown
-    CodeEntry codeEntry(MY_CODE);
-    Serial.println("Waiting for code");
-    uiBeep(const_cast<uint16_t*>(alarmCountdownTune));
-
-    // Alternate tune playing
-    SoundGenerator mute; // Does nothing
-    FlashTuneLoader alternateLoader;
-    TunePlayer alternatePlayer;
-    // Don't want to call begin to reinitialise the sound generator
-    alternateLoader.begin();
-    alternateLoader.setTune(const_cast<uint16_t*>(beeps::error));
-    alternatePlayer.tuneLoader = &alternateLoader;
-    alternatePlayer.soundGenerator = &piezo;
-
-    // Countdown
-    while (tune.isPlaying()) {
-        WATCHDOG_RESET;
-        tune.update();
-        alternatePlayer.update();
-        // TODO: Flash leds or something
-
-        // Code entry
-        if(codeEntry.update()) {
-            // Had enough characters entered
-            if(codeEntry.check()) {
-                // Match
-                break;
-            } else {
-                // Fail.
-                Serial.println(F("Failed attempt"));
-                // Fail beep
-                tune.soundGenerator = &mute; // Ignore the current tune
-                alternateLoader.setTune(const_cast<uint16_t*>(beeps::error));
-                alternatePlayer.soundGenerator = &piezo; // Connect alternate player
-                alternatePlayer.play();
-
-                // Restart code entry
-                codeEntry.start();
-            }
-        }
-
-        // Reconnect countdown tune when alternate beep finished
-        if ((!alternatePlayer.isPlaying()) && (tune.soundGenerator != &piezo)) {
-        // if (alternatePlayer.isPlaying()) { // TODO: If left in, locks up
-            // Finished playing this iteration
-            alternatePlayer.stop(); // Resets the tune program counter
-            tune.soundGenerator = &piezo;
-        }
-        
-    }
-    if(codeEntry.check()) {
+    codeEntry->start();
+    if(codeEntry->playWithTune(const_cast<uint16_t*>(alarmCountdownTune))) {
         // Code successful
         Serial.println(F("Success"));
         return nullptr; // To fall through and exit the state machine
@@ -227,9 +186,16 @@ State* StateCountdown::enter() {
 }
 
 State* StateSiren::enter() {
-    // TODO
-    Serial.println(F("BEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEP!"));
-    return nullptr;
+    Serial.println(F("Siren"));
+    // Am not restarting code entry as there are situations where the deadline
+    // is just missed and the siren starts, so keep going to finish.
+    startBoost();
+    if(codeEntry->playWithTune(const_cast<uint16_t*>(BURGLER_ALARM_TUNE))) {
+        // Code entered successfully
+        return nullptr; // Exit the alarm.
+    } else {
+        return states.sleep; // Wait for another detection.
+    }
 }
 
 CodeEntry::CodeEntry(const uint16_t code) : m_code(code) {
@@ -276,4 +242,58 @@ bool CodeEntry::update() {
 
 bool CodeEntry::check() {
     return (m_code & ~0xf) == (m_inputted << 4);
+}
+
+bool CodeEntry::playWithTune(uint16_t *background_tune) {
+    // Starting code entry / countdown
+    Serial.println("Waiting for code");
+    uiBeep(background_tune);
+
+    // Alternate tune playing
+    SoundGenerator mute; // Does nothing
+    FlashTuneLoader alternateLoader;
+    TunePlayer alternatePlayer;
+    // Don't want to call begin to reinitialise the sound generator
+    alternateLoader.begin();
+    alternateLoader.setTune(const_cast<uint16_t*>(beeps::error));
+    alternatePlayer.tuneLoader = &alternateLoader;
+    alternatePlayer.soundGenerator = &piezo;
+
+    // Countdown
+    while (tune.isPlaying()) {
+        WATCHDOG_RESET;
+        tune.update();
+        alternatePlayer.update();
+        // TODO: Flash leds or something
+
+        // Code entry
+        if(update()) {
+            // Had enough characters entered
+            if(check()) {
+                // Match
+                break;
+            } else {
+                // Fail.
+                Serial.println(F("Failed attempt"));
+                // Fail beep
+                tune.soundGenerator = &mute; // Ignore the current tune
+                alternateLoader.setTune(const_cast<uint16_t*>(beeps::error));
+                alternatePlayer.soundGenerator = &piezo; // Connect alternate player
+                alternatePlayer.play();
+
+                // Restart code entry
+                start();
+            }
+        }
+
+        // Reconnect countdown tune when alternate beep finished
+        if ((!alternatePlayer.isPlaying()) && (tune.soundGenerator != &piezo)) {
+        // if (alternatePlayer.isPlaying()) { // TODO: If left in, locks up
+            // Finished playing this iteration
+            alternatePlayer.stop(); // Resets the tune program counter
+            tune.soundGenerator = &piezo;
+        }
+        
+    }
+    return check();
 }
