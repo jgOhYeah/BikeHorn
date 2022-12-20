@@ -5,8 +5,8 @@
  * Last modified 01/11/2022
  */
 #pragma once
-#include "../../../defines.h"
 #include <Arduino.h>
+#include "../../../defines.h"
 #include "../extensionsManager.h"
 #include "../../optimisations.h"
 #include "../../soundGeneration.h"
