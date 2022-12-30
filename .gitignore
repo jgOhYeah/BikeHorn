@@ -14,3 +14,7 @@ BikeHornPCB-backups
 
 # Musescore
 .mscbackup
+
+# Doxygen
+.doxygen
+Documentation/Doxygen

@@ -16,6 +16,9 @@
 #define ENCODE_CODE(CODE, LENGTH) (CODE<<4 | LENGTH)
 #define COUNTDOWN_TIME 20000
 #define COUNTDOWN_BEEP_INTERVAL 1000
+#define PREVIOUS_RECORDS 40
+
+#include "accelerometer.h"
 
 #define MY_CODE ENCODE_CODE(0b1001011, 7)
 
