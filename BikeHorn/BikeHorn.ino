@@ -20,10 +20,13 @@
 
 // Prototypes so that the extension manager is happy
 void uiBeep(uint16_t* beep);
+void uiBeepBlocking(uint16_t* beep);
 void revertToTune();
 uint32_t modeButtonPress();
 void startBoost();
 inline void stopBoost();
+void sleepGPIO();
+void wakeGPIO();
 
 #include "tunes.h"
 #include "src/optimisations.h"
@@ -224,10 +227,10 @@ void sleepGPIO() {
     Serial.end();
 
     // Using registers so everything can be done at once easily.
-    DDRB = (1 << PB1) | (1 << PB3); // Set everything except pwm to input pullup
+    DDRB = bit(PB1) | bit(PB3); // Set everything except pwm to input pullup
 #ifdef ACCEL_INSTALLED
-    DDRC = ACCEL_PINS;
-    PORTC = ~ACCEL_PINS; // Pull up inputs, set outputs as low.
+    DDRC = ACCEL_PINS_SLEEP_MODE;
+    PORTC = ACCEL_PINS_SLEEP_STATE; // Pull up unusec inputs, set everything else low.
 #else
     DDRC = 0;
     PORTC = 0xff;
@@ -235,7 +238,7 @@ void sleepGPIO() {
 
     // Pull all unused pins high to avoid floating and reduce power.
     DDRD = 0x03; // Set serial as an output to tie low
-    PORTB = ~((1 << PB1) | (1 << PB3));
+    PORTB = ~(bit(PB1) | bit(PB3));
     PORTD = 0xfc; // Don't pull the serial pins high
     
     // Keep as outputs
@@ -252,10 +255,12 @@ void wakeGPIO() {
     DDRD = 0x02; // Serial TX is the only output
     PORTD = 0x0E; // Idle high serial
     Serial.begin(SERIAL_BAUD);
-    DDRB = (1 << PB1) | (1 << PB3);
+    DDRB = bit(PB1) | bit(PB3);
     PORTB = 0x00; // Make sure everything is off
     pinMode(LED_EXTERNAL, OUTPUT);
     pinMode(LED_BUILTIN, OUTPUT);
+
+    // Will leave waking the accelerometer up to its own code as it isn't needed often.
 }
 
 /**
@@ -330,6 +335,21 @@ void uiBeep(uint16_t* beep) {
     tune.setCallOnStop(revertToTune);
     flashLoader.setTune(beep);
     tune.play();
+}
+
+/**
+ * @brief Calls uiBeep and waits untill the tune it done.
+ * 
+ * // TODO: This will probably need to be adapted / removed when button input is added.
+ * 
+ * @param beep 
+ */
+void uiBeepBlocking(uint16_t* beep) {
+    uiBeep(beep);
+    while(tune.isPlaying()) {
+        tune.update();
+        WATCHDOG_RESET;
+    }
 }
 
 /**

@@ -1,3 +1,4 @@
+#include "Arduino.h"
 /** burglerAlarm.cpp
  * Requires an accelerometer by installed.
  * When activated, monitors for movement and sets off the siren if too much
@@ -14,9 +15,15 @@ extern TunePlayer tune;
 extern BikeHornSound piezo;
 extern void startBoost();
 extern void stopBoost();
+extern void uiBeep(uint16_t* beep);
+extern void uiBeepBlocking(uint16_t* beep);
+extern void wakeGPIO();
+extern void sleepGPIO();
 
+// Statis state members
 StatesList State::states;
 CodeEntry* State::codeEntry;
+Acceleromenter* State::accelerometer;
 
 BurglerAlarmExtension::BurglerAlarmExtension() {
     // Add the burgler alarm function pointer to the menu
@@ -27,6 +34,7 @@ BurglerAlarmExtension::BurglerAlarmExtension() {
 
 void BurglerAlarmExtension::stateMachine() {
     Serial.println(F("Starting state machine"));
+    Serial.flush();
 
     // Create and add the states
     StateInit init;
@@ -46,118 +54,63 @@ void BurglerAlarmExtension::stateMachine() {
     CodeEntry codeEntry(MY_CODE);
     State::codeEntry = &codeEntry;
 
+    // Add the accelerometer control
+    Acceleromenter accelerometer;
+    State::accelerometer = &accelerometer;
+
     // Run the state machine
     State* current = &init;
     while (current) {
+        wakeGPIO(); // To enable serial
         Serial.println(current->name); // NOTE: For debugging
         current = current->enter();
     }
 
     // Tidy up
+    accelerometer.stop();
     Serial.println(F("Exiting burgler alarm"));
     // TODO: Beep?
 
 }
 
-// void BurglerAlarmExtension::monitor() {
-//     // LowPower.powerDown(SLEEP_120MS, ADC_OFF, BOD_OFF);
-//     AlarmState state = INIT;
-//     uint16_t iterationsRemaining = 40;
-//     uint32_t startTime;
-//     CodeEntry codeEntry(MY_CODE);
-//     while (true) {
-//         switch(state) {
-//             case INIT:
-//                 // Fill up the buffers and go to Low Power
-//                 takeReading();
-//                 sleepTime = SLEEP_60MS;
-//                 iterationsRemaining--;
-//                 if(!iterationsRemaining) {
-//                     state = SLEEP;
-//                 }
-
-//                 break;
-            
-//             case SLEEP:
-//                 // Long sleeps between checks, go to AWAKE when detected.
-//                 // TODO: GPIO
-//                 if(takeReading()) {
-//                     state = AWAKE;
-//                     iterationsRemaining = 40;
-//                 }
-//                 sleepTime = SLEEP_4S;
-//                 break;
-
-//             case AWAKE:
-//                 // Shorter sleeps between checks, keep accelerometer on. Beep and go to ALERT when detected.
-//                 sleepTime = SLEEP_120MS;
-
-//                 iterationsRemaining--; // Nothing happened for a while
-//                 if(!iterationsRemaining) {
-//                     state = SLEEP;
-//                 }
-//                 if(takeReading()) {
-//                     state = ALERT;
-//                     iterationsRemaining = 40;
-//                 }
-//                 break;
-            
-//             case ALERT:
-//                 // Same as awake, go to COUNTDOWN when detected.
-//                 sleepTime = SLEEP_120MS;
-//                 iterationsRemaining--; // Nothing happened for a while
-//                 if(!iterationsRemaining) {
-//                     state = SLEEP;
-//                 }
-//                 if(takeReading()) {
-//                     state = COUNTDOWN_ENTRY;
-//                 }
-//                 break;
-
-//             case COUNTDOWN_ENTRY:
-//                 // Code that runs at the start of countdown
-//                 state = COUNTDOWN;
-//                 startTime = millis();
-//                 iterationsRemaining = 10;
-//                 codeEntry.start();
-//                 break;
-
-//             case COUNTDOWN:
-//                 // Give 10s to enter code. If successful, return. Else go to siren.
-//                 if(curTune - startTime >= 1000) {
-//                     // Once per second
-//                     iterationsRemaining--;
-//                     startTime = curTune;
-//                 }
-//                 if(!iterationsRemaining) {
-//                     // Run out of time with no success.
-//                     state = SIREN;
-//                 }
-//                 break;
-
-//             default: // SIREN
-//                 // Noise. If button is pressed, go to countdown while still making noise.
-//                 // TODO
-//                 Serial.println("Siren");
-//         }
-//         if (sleepTime != SLEEP_SKIP) {
-//             LowPower.powerDown(sleepTime, ADC_OFF, BOD_OFF); // The horn will spend most of its life here
-//         }
-//     }
-// }
-
-// bool BurglerAlarmExtension::takeReading() {
-//     return false; // TODO
-// }
-
 State* StateInit::enter() {
-    // TODO: Fill up buffer
+    // TODO: Button to cancel
+    accelerometer->start();
+    for (uint8_t i = 0; i != PREVIOUS_RECORDS; i++) {
+        WATCHDOG_RESET;
+        LowPower.powerDown(SLEEP_250MS, ADC_ON, BOD_OFF); // Also time for startup
+        // delay(250);
+        accelerometer->calibrate();
+    }
+    wakeGPIO();
+    uiBeepBlocking(const_cast<uint16_t*>(beeps::acknowledge));
     return states.sleep;
 }
 
 State* StateSleep::enter() {
-    // TODO: Sleep
-    stopBoost();
+    sleepGPIO();
+    while (true) {
+        // TODO: Button to cancel
+        WATCHDOG_RESET;
+
+        // Shut down and sleep
+        accelerometer->stop();
+        LowPower.powerDown(SLEEP_1S, ADC_OFF, BOD_OFF);
+        // delay(1000);
+
+        // Turn the accelerometer on and wait for it start up
+        accelerometer->powerOn();
+        LowPower.powerDown(SLEEP_250MS, ADC_OFF, BOD_OFF);
+        // delay(250);
+
+
+        // Take the reading
+        accelerometer->startADC();
+        if (accelerometer->isMoved()) {
+            Serial.flush();
+            break;
+        }
+    }
     return states.awake;
 }
 

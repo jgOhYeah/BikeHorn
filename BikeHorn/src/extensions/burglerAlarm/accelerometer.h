@@ -8,13 +8,8 @@
 #pragma once
 #include "statistics.h"
 
-#define X_PIN A4 - A0
-#define Y_PIN A3 - A0
-#define Z_PIN A2 - A0
-#define POWER_PIN A5
-#define POWER_PIN_BITMASK bit(5)
-
 // #define ACCELEROMETER_ABS_CHANGE // If defined, store and process the absolute value, otherwise the raw change that may include negatives as well
+// #define ACCEL_DEBUG
 
 /**
  * @brief Class for handling an accelerometer axis.
@@ -36,7 +31,7 @@ class AccelerometerAxis {
          * 
          */
         void calibrate() {
-            int16_t current = analogRead(m_channel+A0);
+            int16_t current = analogRead(m_channel);
             int16_t diff = current - m_previous;
 #ifdef ACCELEROMETER_ABS_CHANGE
             m_stats.add(abs(diff));
@@ -54,16 +49,18 @@ class AccelerometerAxis {
          */
         bool isMoved() {
             // Adc parts from https://www.gammon.com.au/adc
-            ADMUX = bit(REFS0) | (m_channel & 0x07);  // AVcc, set the mux
+            ADMUX = bit(REFS0) | ((m_channel-A0) & 0x07);  // AVcc, set the mux
             bitSet(ADCSRA, ADSC);  // Start a conversion
 
             // Time consuming operations
             double mean = m_stats.standardDev.mean();
             double std = m_stats.standardDev.std();
+#ifdef ACCEL_DEBUG
             Serial.print(mean);
             Serial.write(' ');
             Serial.print(std);
             Serial.write(' ');
+#endif
 
             // Wait until the ADC conversion is finished
             while (bit_is_set(ADCSRA, ADSC)) {
@@ -76,10 +73,12 @@ class AccelerometerAxis {
 #ifdef ACCELEROMETER_ABS_CHANGE
             change = abs(change);
 #endif
+#ifdef ACCEL_DEBUG
             Serial.print(current);
             Serial.write(' ');
             Serial.print(change);
             Serial.write(' ');
+#endif
             bool result = m_stats.isUnlikely(change, mean, max(std, 1));
 
             // Add the results to the sample set.
@@ -105,11 +104,9 @@ class Acceleromenter {
          * @brief Turns the accelerometer on.
          * 
          */
-        inline void start() const {
-            pinMode(POWER_PIN, OUTPUT);
-            digitalWrite(POWER_PIN, HIGH);
-            ADCSRA =  bit (ADEN);   // turn ADC on
-            ADCSRA |= bit (ADPS0) |  bit (ADPS1) | bit (ADPS2);  // Prescaler of 128
+        inline void powerOn() const {
+            pinMode(ACCEL_POWER_PIN, OUTPUT);
+            digitalWrite(ACCEL_POWER_PIN, HIGH);
         }
 
         /**
@@ -117,7 +114,26 @@ class Acceleromenter {
          * 
          */
         inline void stop() const {
-            pinMode(POWER_PIN, INPUT);
+            pinMode(ACCEL_POWER_PIN, INPUT);
+            ADCSRA = 0; // Switch of the ADC
+        }
+
+        /**
+         * @brief Turns on the ADC
+         * 
+         */
+        inline void startADC() const {
+            ADCSRA =  bit (ADEN);   // turn ADC on
+            ADCSRA |= bit (ADPS0) |  bit (ADPS1) | bit (ADPS2);  // Prescaler of 128
+        }
+
+        /**
+         * @brief Turns the accelerometer and ADC on
+         * 
+         */
+        inline void start() const {
+            powerOn();
+            startADC();
         }
 
         /**
@@ -141,11 +157,15 @@ class Acceleromenter {
             bool x = m_xAxis.isMoved();
             bool y = m_yAxis.isMoved();
             bool z = m_zAxis.isMoved();
-            return x || y || z;
+            bool result = x || y || z;
+#ifdef ACCEL_DEBUG
+            Serial.println(result);
+#endif
+            return result;
         }
 
     private:
-        AccelerometerAxis m_xAxis = AccelerometerAxis(X_PIN);
-        AccelerometerAxis m_yAxis = AccelerometerAxis(Y_PIN);
-        AccelerometerAxis m_zAxis = AccelerometerAxis(Z_PIN);
+        AccelerometerAxis m_xAxis = AccelerometerAxis(ACCEL_X_PIN);
+        AccelerometerAxis m_yAxis = AccelerometerAxis(ACCEL_Y_PIN);
+        AccelerometerAxis m_zAxis = AccelerometerAxis(ACCEL_Z_PIN);
 };

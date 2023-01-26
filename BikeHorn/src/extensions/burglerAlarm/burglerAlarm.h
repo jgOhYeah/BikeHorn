@@ -12,15 +12,17 @@
 #include "../../soundGeneration.h"
 #include "../../../tunes.h"
 
-#define SLEEP_SKIP 255
 #define ENCODE_CODE(CODE, LENGTH) (CODE<<4 | LENGTH)
-#define COUNTDOWN_TIME 20000
-#define COUNTDOWN_BEEP_INTERVAL 1000
 #define PREVIOUS_RECORDS 40
+#define STD_DEVIATIONS 3
 
 #include "accelerometer.h"
 
 #define MY_CODE ENCODE_CODE(0b1001011, 7)
+
+#ifndef ACCEL_INSTALLED
+    #warning "The burgler alarm extension requires the accelerometer to be installed. Enable it in defines.h"
+#endif
 
 struct StatesList;
 class CodeEntry;
@@ -47,17 +49,11 @@ class BurglerAlarmExtension : public Extension {
         BurglerAlarmExtension();
 
         void stateMachine();
-
-        // void monitor();
-
-        // bool takeReading();
+        void onStart() {
+            stateMachine(); // TODO
+        }
 
     private:
-        /**
-         * @brief What state the alarm is in.
-         * 
-         */
-        enum AlarmState {INIT, SLEEP, AWAKE, ALERT, COUNTDOWN_ENTRY, COUNTDOWN, SIREN};
 
 };
 
@@ -77,6 +73,8 @@ class State {
         const __FlashStringHelper* name;
         static StatesList states;
         static CodeEntry *codeEntry;
+        static Acceleromenter *accelerometer;
+
     protected:
         State(const __FlashStringHelper* name) : name(name) {}
 };

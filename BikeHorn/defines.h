@@ -69,7 +69,8 @@
 #define ACCEL_Y_PIN A3
 #define ACCEL_Z_PIN A2
 #define ACCEL_POWER_PIN A5
-#define ACCEL_PINS 0b00111100 // Bit map of the above
+#define ACCEL_PINS_SLEEP_MODE 0b00000000 // Input or output
+#define ACCEL_PINS_SLEEP_STATE 0b11000011 // Pulled high (potentially through a resistor) or low.
 
 /**
  * @brief Other defines
