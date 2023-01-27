@@ -5,7 +5,7 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 07/11/2022
+ * Last modified 27/01/2023
  * 
  * Requires these libraries (can be installed through the library manager):
  *   - Low-Power (https://github.com/rocketscream/Low-Power) - Shuts things down to save power.
@@ -40,11 +40,10 @@ uint8_t curTune = 0;
 period_t sleepTime = SLEEP_FOREVER;
 
 #ifdef ENABLE_WARBLE
-Warble warble;extern void uiBeep();
+Warble warble;
+extern void uiBeep();
 #endif
 
-// Stores which pin was responsible for waking the system up.
-enum Buttons {NONE, HORN, MODE};
 volatile Buttons wakePin;
 
 #include "src/extensions/extensions.h"
@@ -88,24 +87,20 @@ void loop() {
         Serial.println(F("Going to sleep"));
         extensionManager.callOnSleep();
         sleepGPIO();
-        wakePin = NONE;
-        // Set interrupts to wake the processor up again when required
-        attachInterrupt(digitalPinToInterrupt(BUTTON_HORN), wakeUpHornISR, LOW);
-        attachInterrupt(digitalPinToInterrupt(BUTTON_MODE), wakeUpModeISR, LOW);
+        wakeUpEnable();
         WATCHDOG_DISABLE;
         LowPower.powerDown(sleepTime, ADC_OFF, BOD_OFF); // The horn will spend most of its life here
-        detachInterrupt(digitalPinToInterrupt(BUTTON_HORN));
-        detachInterrupt(digitalPinToInterrupt(BUTTON_MODE));
+        wakeUpDisable();
         WATCHDOG_ENABLE;
         wakeGPIO();
         Serial.println(F("Waking up"));
         extensionManager.callOnWake();
     } else {
-        wakePin = HORN;
+        wakePin = PRESSED_HORN;
     }
 
     // If we got here, a button was pressed
-    if(wakePin == HORN) {
+    if(wakePin == PRESSED_HORN) {
         // Play a tune
         extensionManager.callOnTuneStart();
         // Start playing
@@ -172,7 +167,7 @@ void loop() {
 #endif
         extensionManager.callOnTuneStop();
 
-    } else if (wakePin == MODE) {
+    } else if (wakePin == PRESSED_MODE) {
         // Change tune as the other button is pressed
         digitalWrite(LED_EXTERNAL, HIGH);
 
@@ -263,18 +258,30 @@ void wakeGPIO() {
     // Will leave waking the accelerometer up to its own code as it isn't needed often.
 }
 
+void wakeUpEnable() {
+    wakePin = PRESSED_NONE;
+    // Set interrupts to wake the processor up again when required
+    attachInterrupt(digitalPinToInterrupt(BUTTON_HORN), wakeUpHornISR, LOW);
+    attachInterrupt(digitalPinToInterrupt(BUTTON_MODE), wakeUpModeISR, LOW);
+}
+
+void wakeUpDisable() {
+    detachInterrupt(digitalPinToInterrupt(BUTTON_HORN));
+    detachInterrupt(digitalPinToInterrupt(BUTTON_MODE));
+}
+
 /**
  * Interrupt Service Routine (ISR) called when the hirn wakes up with the horn button pressed.
  */
 void wakeUpHornISR() {
-    wakePin = HORN;
+    wakePin = PRESSED_HORN;
 }
 
 /**
  * Interrupt Service Routine (ISR) called when the hirn wakes up with the mode button pressed.
  */
 void wakeUpModeISR() {
-    wakePin = MODE;
+    wakePin = PRESSED_MODE;
 }
 
 /**
@@ -317,7 +324,7 @@ uint32_t modeButtonPress() {
 
         // If the horn button is pressed, exit immediately to start playing a tune.
         if(IS_PRESSED(BUTTON_HORN)) {
-            wakePin = HORN;
+            wakePin = PRESSED_HORN;
             return 1;
         }
     }

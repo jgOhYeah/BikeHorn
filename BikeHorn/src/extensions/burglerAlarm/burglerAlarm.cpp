@@ -5,7 +5,7 @@
  * movement is detected.
  * 
  * Written by Jotham Gates
- * Last modified 07/11/2022
+ * Last modified 27/01/2023
  */
 
 #include "burglerAlarm.h"
@@ -13,12 +13,15 @@
 // Global variables that are accessed.
 extern TunePlayer tune;
 extern BikeHornSound piezo;
+extern volatile Buttons wakePin;
 extern void startBoost();
 extern void stopBoost();
 extern void uiBeep(uint16_t* beep);
 extern void uiBeepBlocking(uint16_t* beep);
 extern void wakeGPIO();
 extern void sleepGPIO();
+extern void wakeUpEnable();
+extern void wakeUpDisable();
 
 // Statis state members
 StatesList State::states;
@@ -30,6 +33,10 @@ BurglerAlarmExtension::BurglerAlarmExtension() {
     menuActions.length = 1;
     menuActions.array = (MenuItem*)malloc(sizeof(MenuItem));
     menuActions.array[0] = (MenuItem)&BurglerAlarmExtension::stateMachine;
+}
+
+void BurglerAlarmExtension::onStart() {
+    stateMachine();
 }
 
 void BurglerAlarmExtension::stateMachine() {
@@ -75,42 +82,55 @@ void BurglerAlarmExtension::stateMachine() {
 
 State* StateInit::enter() {
     // TODO: Button to cancel
+    wakeUpEnable(); // Enable waking up and cancelling if pressed.
     accelerometer->start();
-    for (uint8_t i = 0; i != PREVIOUS_RECORDS; i++) {
+    for (uint8_t i = 0; i != PREVIOUS_RECORDS && wakePin == PRESSED_NONE; i++) {
         WATCHDOG_RESET;
         LowPower.powerDown(SLEEP_250MS, ADC_ON, BOD_OFF); // Also time for startup
-        // delay(250);
         accelerometer->calibrate();
     }
+    wakeUpDisable();
     wakeGPIO();
-    uiBeepBlocking(const_cast<uint16_t*>(beeps::acknowledge));
-    return states.sleep;
+    // Check if the alarm entry has been cancelled.
+    if(wakePin == PRESSED_NONE) {
+        // Not touched, go to alarm
+        uiBeepBlocking(const_cast<uint16_t*>(beeps::acknowledge));
+        return states.sleep;
+    } else {
+        // Touched, cancel alarm
+        uiBeepBlocking(const_cast<uint16_t*>(beeps::cancel));
+        return nullptr;
+    }
 }
 
 State* StateSleep::enter() {
+    // State setup
     sleepGPIO();
-    while (true) {
-        // TODO: Button to cancel
+    wakeUpEnable();
+
+    // Main loop
+    do {
         WATCHDOG_RESET;
 
         // Shut down and sleep
         accelerometer->stop();
         LowPower.powerDown(SLEEP_1S, ADC_OFF, BOD_OFF);
-        // delay(1000);
+
+        // Check the button wasn't pressed during the shutdown sleep
+        if (wakePin != PRESSED_NONE) {
+            break;
+        }
 
         // Turn the accelerometer on and wait for it start up
         accelerometer->powerOn();
         LowPower.powerDown(SLEEP_250MS, ADC_OFF, BOD_OFF);
-        // delay(250);
-
 
         // Take the reading
         accelerometer->startADC();
-        if (accelerometer->isMoved()) {
-            Serial.flush();
-            break;
-        }
-    }
+    } while (wakePin == PRESSED_NONE && !accelerometer->isMoved());
+
+    // Exiting the state
+    wakeUpDisable();
     return states.awake;
 }
 
@@ -162,7 +182,7 @@ CodeEntry::CodeEntry(const uint16_t pin, const uint8_t length) : m_code(ENCODE_C
 void CodeEntry::start() {
     m_charsLeft = m_code & 0xf;
     m_inputted = 0;
-    m_lastPressedTime = millis();
+    m_lastPressedTime = millis() - DEBOUNCE_TIME - 1; // Subtracting debounce time so that the button being pressed at the start is recognised
 }
 
 bool CodeEntry::add(bool character) {

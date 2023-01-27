@@ -5,7 +5,7 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 01/11/2022
+ * Last modified 27/01/2023
  */
 
 #pragma once
@@ -82,6 +82,8 @@
 #define DEFAULT_TEMPO 120 // UI beeps
 #define IS_PRESSED(PIN) !digitalRead(PIN) // Macro to make things a little clearer
 
+// Stores which pin was responsible for waking the system up.
+enum Buttons {PRESSED_NONE, PRESSED_HORN, PRESSED_MODE};
 
 /**
  * @brief Libraries to include

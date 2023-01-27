@@ -2,7 +2,7 @@
  * See burglerAlarm.h for more info
  * 
  * Written by Jotham Gates
- * Last modified 01/11/2022
+ * Last modified 27/01/2023
  */
 #pragma once
 #include <Arduino.h>
@@ -49,9 +49,7 @@ class BurglerAlarmExtension : public Extension {
         BurglerAlarmExtension();
 
         void stateMachine();
-        void onStart() {
-            stateMachine(); // TODO
-        }
+        void onStart();
 
     private:
 
