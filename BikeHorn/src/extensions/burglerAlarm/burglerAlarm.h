@@ -15,6 +15,8 @@
 #define ENCODE_CODE(CODE, LENGTH) (CODE<<4 | LENGTH)
 #define PREVIOUS_RECORDS 40
 #define STD_DEVIATIONS 3
+#define IGNORE_CYCLES 20
+#define ALERT_CYCLES 40
 
 #include "accelerometer.h"
 

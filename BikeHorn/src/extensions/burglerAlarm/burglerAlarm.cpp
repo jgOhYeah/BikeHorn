@@ -131,17 +131,69 @@ State* StateSleep::enter() {
 
     // Exiting the state
     wakeUpDisable();
-    return states.awake;
+    if (wakePin == PRESSED_NONE) {
+        // Button not pressed.
+        return states.awake;
+    } else {
+        // Button pressed.
+        return states.countdown;
+    }
 }
 
 State* StateAwake::enter() {
-    // TODO
-    return states.alert;
+    // Start up
+    wakeUpEnable();
+    accelerometer->powerOn();
+    accelerometer->startADC();
+
+    // Monitor the accelerometer at a higher rate for a while.
+    for (uint8_t i = 0; i != IGNORE_CYCLES && wakePin == PRESSED_NONE; i++) {
+        WATCHDOG_RESET;
+        digitalWrite(LED_EXTERNAL, LOW);
+        LowPower.powerDown(SLEEP_250MS, ADC_ON, BOD_OFF); // Also time for startup
+        digitalWrite(LED_EXTERNAL, HIGH);
+        accelerometer->isMoved(); // Ignore for a while
+    }
+    
+    // Time spent or button pressed.
+    wakeUpDisable();
+    digitalWrite(LED_EXTERNAL, LOW);
+    if (wakePin == PRESSED_NONE) {
+        // Timed out.
+        return states.alert;
+    } else {
+        // Button pressed.
+        return states.countdown;
+    }
 }
 
 State* StateAlert::enter() {
-    // TODO
-    return states.countdown;
+    // Start up
+    wakeUpEnable();
+    accelerometer->powerOn();
+    accelerometer->startADC();
+
+    // Monitor the accelerometer at a higher rate for a while.
+    for (uint8_t i = 0; i != ALERT_CYCLES && wakePin == PRESSED_NONE; i++) {
+        WATCHDOG_RESET;
+        digitalWrite(LED_EXTERNAL, LOW);
+        LowPower.powerDown(SLEEP_250MS, ADC_ON, BOD_OFF); // Also time for startup
+        digitalWrite(LED_EXTERNAL, HIGH);
+        if (accelerometer->isMoved()) {
+            wakeUpDisable();
+            return states.countdown;
+        }
+    }
+
+    // Not moved. Timed out or button pressed.
+    wakeUpDisable();
+    if (wakePin == PRESSED_NONE) {
+        // Timed out.
+        return states.sleep;
+    } else {
+        // Button pressed.
+        return states.countdown;
+    }
 }
 
 State* StateCountdown::enter() {
