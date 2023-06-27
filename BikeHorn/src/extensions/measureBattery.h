@@ -2,7 +2,8 @@
  * Prints the battery voltage to the console every so often.
  * 
  * Written by Jotham Gates
- * Last modified 01/11/2022
+ * Created 09/07/2022
+ * Last modified 27/06/2023
  */
 #pragma once
 #include "extensionsManager.h"
@@ -37,6 +38,9 @@ class MeasureBatteryExtension: public Extension {
          * @return uint32_t the voltage in mv.
          */
         uint32_t readVcc() {
+            ADCSRA =  bit (ADEN);   // turn ADC on
+            ADCSRA |= bit (ADPS0) |  bit (ADPS1) | bit (ADPS2);  // Prescaler of 128
+
             // Read 1.1V reference against AVcc
             // set the reference to Vcc and the measurement to the internal 1.1V reference
 #if defined(__AVR_ATmega32U4__) || defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)

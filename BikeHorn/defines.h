@@ -5,11 +5,11 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 27/01/2023
+ * Last modified 27/06/2023
  */
 
 #pragma once
-#define VERSION "1.4.0a"
+#define VERSION "1.4.1"
 
 /**
  * @brief Pins and system setup

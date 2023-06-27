@@ -8,7 +8,7 @@
 %phony: compile upload
 
 compile:
-	arduino-cli compile --fqbn arduino:avr:nano
+	arduino-cli compile --fqbn arduino:avr:uno
 
 upload:
-	arduino-cli upload --fqbn arduino:avr:nano -p /dev/ttyUSB0
+	arduino-cli upload --fqbn arduino:avr:uno -p /dev/ttyUSB0
