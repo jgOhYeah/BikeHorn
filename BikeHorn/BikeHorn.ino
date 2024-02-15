@@ -5,7 +5,7 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 11/01/2022
+ * Last modified 27/01/2023
  * 
  * Requires these libraries (can be installed through the library manager):
  *   - Low-Power (https://github.com/rocketscream/Low-Power) - Shuts things down to save power.
@@ -18,50 +18,35 @@
 
 #include "defines.h"
 
-// Libraries to include.
-#include <cppQueue.h>
-#include <LowPower.h>
-#include <TunePlayer.h>
-#include <EEPROM.h>
-
-// EEPROMWearLevel is only required if LOG_RUN_TIME is defined in defines.h
-#ifdef LOG_RUN_TIME
-    #include <EEPROMWearLevel.h>
-#endif
-
-// Only needed for the watchdog timer (DO NOT enable for Arduinos with the old bootloader).
-#ifdef ENABLE_WATCHDOG_TIMER
-    #include <avr/wdt.h>
-    #define WATCHDOG_ENABLE wdt_enable(WDTO_4S)
-    #define WATCHDOG_DISABLE wdt_disable()
-    #define WATCHDOG_RESET wdt_reset()
-#else
-    #define WATCHDOG_ENABLE
-    #define WATCHDOG_DISABLE
-    #define WATCHDOG_RESET
-#endif
+// Prototypes so that the extension manager is happy
+void uiBeep(uint16_t* beep);
+void uiBeepBlocking(uint16_t* beep);
+void revertToTune();
+uint32_t modeButtonPress();
+void startBoost();
+inline void stopBoost();
+void sleepGPIO();
+void wakeGPIO();
 
 #include "tunes.h"
-#include "optimisations.h"
-#include "soundGeneration.h"
+#include "src/optimisations.h"
+#include "src/soundGeneration.h"
+#include "src/soundGenerationStatic.h"
 
 FlashTuneLoader flashLoader;
 BikeHornSound piezo;
 TunePlayer tune;
 uint8_t curTune = 0;
+period_t sleepTime = SLEEP_FOREVER;
 
 #ifdef ENABLE_WARBLE
 Warble warble;
+extern void uiBeep();
 #endif
 
+volatile Buttons wakePin;
 
-#ifdef LOG_RUN_TIME
-uint32_t startTime;
-#endif
-
-// Stores which pin was responsible for waking the system up.
-enum WakePin {none, horn, mode};
-volatile WakePin wakePin;
+#include "src/extensions/extensions.h"
 
 void setup() {
     WATCHDOG_ENABLE;
@@ -72,93 +57,54 @@ void setup() {
     Serial.print(tuneCount);
     Serial.println(F(" tunes installed"));
 
-    // Logging (optional)
-#ifdef LOG_RUN_TIME
-    EEPROMwl.begin(LOG_VERSION, 2, EEPROM_WEAR_LEVEL_LENGTH);
-    Serial.print(F("Run time logging enabled. Horn has been sounding for "));
-    Serial.print(getTime() / 1000);
-    Serial.println(F(" seconds."));
-    Serial.print(F("The horn has been used "));
-    Serial.print(getBeeps());
-    Serial.println(F(" times."));
-
-#endif
-
     // Tune Player
     flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
     tune.begin(&flashLoader, &piezo);
     tune.spool();
 
+    // Extensions
+    extensionManager.callOnStart();
+
 #ifdef ENABLE_WARBLE
     /// Warble mode
     warble.begin(&piezo, WARBLE_LOWER, WARBLE_UPPER, WARBLE_RISE, WARBLE_FALL);
 #endif
-
-    // Go to midi synth mode if change mode and horn button pressed or reset the eeprom.
-    if(!digitalRead(BUTTON_MODE)) {
-#ifdef LOG_RUN_TIME
-        if(!digitalRead(BUTTON_HORN)) {
-            // Both buttons pressed. If both are pressed for 5 seconds, reset the EEPROM.
-            uint32_t startTime = millis();
-            bool success = true;
-            digitalWrite(LED_BUILTIN, HIGH);
-            while(millis() - startTime < 5000) {
-                WATCHDOG_RESET;
-                if(digitalRead(BUTTON_HORN) | digitalRead(BUTTON_MODE)) {
-                    success = false;
-                    break;
-                }
-                digitalWrite(LED_EXTERNAL, HIGH);
-                delay(100);
-                digitalWrite(LED_EXTERNAL, LOW);
-                delay(100);
-            }
-            digitalWrite(LED_BUILTIN, LOW);
-
-            // Check if we left early or at the full time
-            if(success) {
-                Serial.println(F("Resetting EEPROM"));
-                resetEEPROM();
-            }
-        } else {
-            // Only the change tune button pressed. Midi mode.
-            midiSynth();
-        }
-#else
-        midiSynth();
-#endif
-    }
 }
 
 void loop() {
     // Go to sleep if not pressed and wake up when a button is pressed
-    if(digitalRead(BUTTON_HORN)) {
+    if(!IS_PRESSED(BUTTON_HORN)) {
+        // Wait for tune (beep) to finish before sleeping.
+        while(tune.isPlaying()) {
+            tune.update();
+            WATCHDOG_RESET;
+            if (IS_PRESSED(BUTTON_HORN)) {
+                // On rare occasions when the button is pressed during a beep, go to sleep and wake up again quickly.
+                tune.stop();
+                break;
+            }
+        }
         Serial.println(F("Going to sleep"));
+        extensionManager.callOnSleep();
         sleepGPIO();
-        // Set interrupts to wake the processor up again when required
-        attachInterrupt(digitalPinToInterrupt(BUTTON_HORN), wakeUpHornISR, LOW);
-        attachInterrupt(digitalPinToInterrupt(BUTTON_MODE), wakeUpModeISR, LOW);
+        wakeUpEnable();
         WATCHDOG_DISABLE;
-        LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF); // The horn will spend most of its life here
-        detachInterrupt(digitalPinToInterrupt(BUTTON_HORN));
-        detachInterrupt(digitalPinToInterrupt(BUTTON_MODE));
+        LowPower.powerDown(sleepTime, ADC_OFF, BOD_OFF); // The horn will spend most of its life here
+        wakeUpDisable();
         WATCHDOG_ENABLE;
         wakeGPIO();
         Serial.println(F("Waking up"));
+        extensionManager.callOnWake();
     } else {
-        wakePin = horn;
+        wakePin = PRESSED_HORN;
     }
 
     // If we got here, a button was pressed
-    if(wakePin == horn) {
+    if(wakePin == PRESSED_HORN) {
         // Play a tune
-
-#ifdef LOG_RUN_TIME
-        uint32_t wakeTime = millis();
-#endif
+        extensionManager.callOnTuneStart();
         // Start playing
         startBoost();
-
 #ifdef ENABLE_WARBLE
         if(curTune != tuneCount) {
             // Normal tune playing mode
@@ -176,8 +122,9 @@ void loop() {
         bool ledState = true;
 
         uint32_t startTime = millis();
-        uint32_t curTime = millis();
-        while (curTime - startTime < DEBOUNCE_TIME) {
+        uint32_t curTime;
+        uint32_t ledStart = startTime;
+        do {
             WATCHDOG_RESET;
 
 #ifdef ENABLE_WARBLE
@@ -193,7 +140,6 @@ void loop() {
 #endif
 
             // Flash the LED every so often
-            static uint32_t ledStart = curTime;
             if(curTime - ledStart > 125) {
                 ledStart = curTime;
                 digitalWrite(LED_EXTERNAL, !ledState);
@@ -201,69 +147,66 @@ void loop() {
             }
 
             // Check if the button is pressed and reset the time if it is.
-            if(!digitalRead(BUTTON_HORN)) {
+            if(IS_PRESSED(BUTTON_HORN)) {
                 startTime = curTime;
             }
             curTime = millis();
-        }
-#ifdef LOG_RUN_TIME
-        addTime(millis() - wakeTime);
-        addBeep();
-#endif
-    } else {
-        // Change tune as the other button is pressed
-        digitalWrite(LED_EXTERNAL, HIGH);
-        curTune++;
+        } while (curTime - startTime < DEBOUNCE_TIME);
+
+        // Stop playing the tune
 #ifdef ENABLE_WARBLE
-        if(curTune > tuneCount) { // Use == for the warble mode
-            curTune = 0;
-        }
         if(curTune != tuneCount) {
-            // Change tune as normal
-#else
-        if(curTune == tuneCount) {
-            curTune = 0;
-        }
-#endif
-            Serial.print(F("Changing to tune "));
-            Serial.println(curTune);
-            flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
-#ifdef ENABLE_WARBLE
+            tune.stop();
+            tune.spool();
         } else {
-            // Don't do anything here and select on the fly
-            Serial.println(F("Changing to warble mode"));
-
+            warble.stop();
         }
-#endif
-
-        // Only let go once button is not pushed for more than DEBOUNCE_TIME
-        uint32_t startTime = millis();
-        while(millis() - startTime < DEBOUNCE_TIME) {
-            WATCHDOG_RESET;
-            if(!digitalRead(BUTTON_MODE)) {
-                startTime = millis();
-            }
-
-            // If the horn button is pressed, exit immediately to start playing a tune.
-            if(!digitalRead(BUTTON_HORN)) {
-                wakePin = horn;
-                break;
-            }
-        }
-    }
-
-    // Stop tune and setup for the next time
-#ifdef ENABLE_WARBLE
-    if(curTune != tuneCount) {
+#else
         tune.stop();
         tune.spool();
-    } else {
-        warble.stop();
-    }
-#else
-    tune.stop();
-    tune.spool();
 #endif
+        extensionManager.callOnTuneStop();
+
+    } else if (wakePin == PRESSED_MODE) {
+        // Change tune as the other button is pressed
+        digitalWrite(LED_EXTERNAL, HIGH);
+
+        // Only let go once button is not pushed for more than DEBOUNCE_TIME
+        uint32_t pressTime = modeButtonPress();
+
+        // Was this a long or short press?
+        if (pressTime < LONG_PRESS_TIME) {
+            // Short press, change tune
+            curTune++;
+#ifdef ENABLE_WARBLE
+            if(curTune > tuneCount) { // Use == for the warble mode
+                curTune = 0;
+            }
+            if(curTune != tuneCount) {
+                // Change tune as normal
+#else
+            if(curTune == tuneCount) {
+                curTune = 0;
+            }
+#endif
+                Serial.print(F("Changing to tune "));
+                Serial.println(curTune);
+                flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
+
+                // Stop tune and setup for the next time
+                tune.stop();
+                tune.spool();
+#ifdef ENABLE_WARBLE
+            } else {
+                // Don't do anything here and select on the fly
+                Serial.println(F("Changing to warble mode"));
+            }
+#endif
+        } else {
+            // Long press, display menu for extensions
+            extensionManager.displayMenu();
+        }
+    }
 }
 
 /**
@@ -273,20 +216,24 @@ void sleepGPIO() {
     // Shut down timers to release pins
     TCCR1A = 0;
     TCCR1B = 0;
-    TCCR2A = 0;
-    TCCR2B = 0;
+    stopBoost();
 
     // Shutdown serial so it won't be affected by playing with the io lines
     Serial.end();
 
     // Using registers so everything can be done at once easily.
-    DDRB = (1 << PB1) | (1 << PB3); // Set everything except pwm to input pullup
+    DDRB = bit(PB1) | bit(PB3); // Set everything except pwm to input pullup
+#ifdef ACCEL_INSTALLED
+    DDRC = ACCEL_PINS_SLEEP_MODE;
+    PORTC = ACCEL_PINS_SLEEP_STATE; // Pull up unusec inputs, set everything else low.
+#else
     DDRC = 0;
+    PORTC = 0xff;
+#endif
 
     // Pull all unused pins high to avoid floating and reduce power.
     DDRD = 0x03; // Set serial as an output to tie low
-    PORTB = ~((1 << PB1) | (1 << PB3));
-    PORTC = 0xff;
+    PORTB = ~(bit(PB1) | bit(PB3));
     PORTD = 0xfc; // Don't pull the serial pins high
     
     // Keep as outputs
@@ -303,24 +250,38 @@ void wakeGPIO() {
     DDRD = 0x02; // Serial TX is the only output
     PORTD = 0x0E; // Idle high serial
     Serial.begin(SERIAL_BAUD);
-    DDRB = (1 << PB1) | (1 << PB3);
+    DDRB = bit(PB1) | bit(PB3);
     PORTB = 0x00; // Make sure everything is off
     pinMode(LED_EXTERNAL, OUTPUT);
     pinMode(LED_BUILTIN, OUTPUT);
+
+    // Will leave waking the accelerometer up to its own code as it isn't needed often.
+}
+
+void wakeUpEnable() {
+    wakePin = PRESSED_NONE;
+    // Set interrupts to wake the processor up again when required
+    attachInterrupt(digitalPinToInterrupt(BUTTON_HORN), wakeUpHornISR, LOW);
+    attachInterrupt(digitalPinToInterrupt(BUTTON_MODE), wakeUpModeISR, LOW);
+}
+
+void wakeUpDisable() {
+    detachInterrupt(digitalPinToInterrupt(BUTTON_HORN));
+    detachInterrupt(digitalPinToInterrupt(BUTTON_MODE));
 }
 
 /**
  * Interrupt Service Routine (ISR) called when the hirn wakes up with the horn button pressed.
  */
 void wakeUpHornISR() {
-    wakePin = horn;
+    wakePin = PRESSED_HORN;
 }
 
 /**
  * Interrupt Service Routine (ISR) called when the hirn wakes up with the mode button pressed.
  */
 void wakeUpModeISR() {
-    wakePin = mode;
+    wakePin = PRESSED_MODE;
 }
 
 /**
@@ -335,91 +296,84 @@ void startBoost() {
     OCR2A = IDLE_DUTY; // Enough duty cycle to keep the voltage on the second stage at a reasonable level.
 }
 
-/** Mode for a midi synth. This is blocking and will only exit on reset or if the horn button is pressed. */
-void midiSynth() {
-    // Flashing lights to warn of being in this mode
-    digitalWrite(LED_BUILTIN, LOW);
-    digitalWrite(LED_EXTERNAL, HIGH);
+/**
+ * @brief Stops timer 2, which controls the boost stage.
+ * 
+ */
+inline void stopBoost() {
+    TCCR2A = 0;
+    TCCR2B = 0;
+}
 
-    startBoost();
-    uint8_t currentNote;
-
-    while(digitalRead(BUTTON_HORN)) {
+/**
+ * @brief Waits until the mode button has been released and returns the time
+ * it was pressed in ms. If the horn button is pressed at any time, returns 1.
+ * 
+ * @return uint32_t 
+ */
+uint32_t modeButtonPress() {
+    // Only let go once button is not pushed for more than DEBOUNCE_TIME
+    uint32_t pressTime = millis();
+    uint32_t debounceTime = pressTime;
+    while(millis() - debounceTime < DEBOUNCE_TIME) {
         WATCHDOG_RESET;
-        uint8_t incomingNote; // The next byte to be read off the serial buffer.
-        uint8_t midiPitch; // The MIDI note number.
-        uint8_t midiVelocity; //The velocity of the note.
+        tune.update();
+        if(IS_PRESSED(BUTTON_MODE)) {
+            debounceTime = millis();
+        }
 
-        incomingNote = getByte();
-        // Analyse the byte. The byte at this stage should be a status byte. If it isn't, the byte is ignored.
-        switch (incomingNote) {
-            case B10010000 | MIDI_CHANNEL: // Note on
-            midiPitch = getByte();
-            if(midiPitch != -1) {
-                midiVelocity = getByte();
-                if(midiVelocity != -1) {
-                    piezo.playMidiNote(midiPitch); // This will handle the conversion into note and octave.
-                    digitalWrite(LED_BUILTIN, HIGH);
-                    digitalWrite(LED_EXTERNAL, LOW);
-                    currentNote = midiPitch;
-                }
-            }
-            break;
-
-            case B10000000 | MIDI_CHANNEL: // Note off
-            midiPitch = getByte();
-            if(midiPitch == currentNote) {
-                piezo.stopSound();
-                digitalWrite(LED_BUILTIN, LOW);
-                digitalWrite(LED_EXTERNAL, HIGH);
-            }
-            break;
+        // If the horn button is pressed, exit immediately to start playing a tune.
+        if(IS_PRESSED(BUTTON_HORN)) {
+            wakePin = PRESSED_HORN;
+            return 1;
         }
     }
-    piezo.stopSound();
-    digitalWrite(LED_BUILTIN, LOW);
-    digitalWrite(LED_EXTERNAL, LOW);
+    return millis() - pressTime;
 }
 
-/** Wait for an incoming note and return the note. */
-byte getByte() {
-    while (!Serial.available() && digitalRead(BUTTON_HORN)) {
+/**
+ * @brief Stores the current tune, then starts playing a beep / other tune.
+ * When this is finished, the original tune will be restored.
+ * 
+ * @param beep the new tune.
+ */
+void uiBeep(uint16_t* beep) {
+    tune.stop();
+    tune.setCallOnStop(revertToTune);
+    flashLoader.setTune(beep);
+    tune.play();
+}
+
+/**
+ * @brief Calls uiBeep and waits untill the tune it done.
+ * 
+ * // TODO: This will probably need to be adapted / removed when button input is added.
+ * 
+ * @param beep 
+ */
+void uiBeepBlocking(uint16_t* beep) {
+    uiBeep(beep);
+    while(tune.isPlaying()) {
+        tune.update();
         WATCHDOG_RESET;
-    } //Wait while there are no bytes to read in the buffer.
-    return Serial.read();
+    }
 }
 
-// Stuff only needed if recording run time.
-#ifdef LOG_RUN_TIME
-/** @returns the time the horn has been sounding in ms */
-uint32_t getTime() {
-    uint32_t time;
-    EEPROMwl.get(0, time);
-    return time;
-}
-
-/** Add @param time in ms to the total time the horn has been sounding */
-void addTime(uint32_t time) {
-    time += getTime();
-    EEPROMwl.put(0, time);
-}
-
-/** @returns the number of times the horn has gone off */
-uint16_t getBeeps() {
-    uint16_t beeps;
-    EEPROMwl.get(1, beeps);
-    return beeps;
-}
-
-/** Adds 1 to the number of times the horn has gone off */
-void addBeep() {
-    uint16_t beeps = getBeeps() + 1;
-    EEPROMwl.put(1, beeps);
-}
-
-/** Resets stored data to 0 */
-void resetEEPROM() {
-    EEPROMwl.put(0, (uint32_t)0);
-    EEPROMwl.put(1, (uint16_t)0);
-}
+/**
+ * @brief Reverts the current tune to the selected one.
+ * 
+ */
+void revertToTune() {
+    tune.setCallOnStop(NULL);
+    tune.stop();
+    // If in warble, mode, don't do anything as the flashLoader object isn't used for that and will be set before next use.
+#ifdef ENABLE_WARBLE
+    if(curTune != tuneCount) {
+        // Normal tune playing mode
+        flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
+        tune.spool();
+    }
+#else
+    flashLoader.setTune((uint16_t*)pgm_read_word(&(tunes[curTune])));
 #endif
+}

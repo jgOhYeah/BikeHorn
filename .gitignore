@@ -10,3 +10,11 @@
 # Kicad
 *.kicad_pcb-bak
 *.sch-bak
+BikeHornPCB-backups
+
+# Musescore
+.mscbackup
+
+# Doxygen
+.doxygen
+Documentation/Doxygen

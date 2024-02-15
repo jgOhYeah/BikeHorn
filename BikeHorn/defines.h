@@ -5,10 +5,11 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 11/01/2022
+ * Last modified 27/06/2023
  */
- 
-#define VERSION "1.3.0b"
+
+#pragma once
+#define VERSION "1.4.1"
 
 /**
  * @brief Pins and system setup
@@ -47,13 +48,29 @@
  * 
  */
 #define LOG_RUN_TIME // Define this if you want to keep a record of run time when in horn mode for battery usage analysis.
-
-#define LOG_VERSION 3
 #define EEPROM_PIECEWISE_SIZE 81 // 1 length byte + 10 linear functions for a piecewise function
 #define EEPROM_TIMER1_PIECEWISE 0x35e // Near the end so that the wear levelling can have the start
 #define EEPROM_TIMER2_PIECEWISE EEPROM_TIMER1_PIECEWISE + EEPROM_PIECEWISE_SIZE
 #define EEPROM_PIECEWISE_MAX_LENGTH 10 // Max number of functions piecewise function for sanity checking before allocating ram.
-#define EEPROM_WEAR_LEVEL_LENGTH 1024 - 2*EEPROM_PIECEWISE_SIZE // Leave enough space at the end for the optimiser settings
+
+/**
+ * @brief User interface
+ * 
+ */
+#define LONG_PRESS_TIME 2000
+#define MENU_TIMEOUT 30000
+
+/**
+ * @brief Accelerometer
+ * 
+ */
+#define ACCEL_INSTALLED
+#define ACCEL_X_PIN A4
+#define ACCEL_Y_PIN A3
+#define ACCEL_Z_PIN A2
+#define ACCEL_POWER_PIN A5
+#define ACCEL_PINS_SLEEP_MODE 0b00000000 // Input or output
+#define ACCEL_PINS_SLEEP_STATE 0b11000011 // Pulled high (potentially through a resistor) or low.
 
 /**
  * @brief Other defines
@@ -61,3 +78,30 @@
  */
 #define WELCOME_MSG "Bike horn V" VERSION " started. Compiled " __TIME__ ", " __DATE__
 #define MANUAL_CUTOFF // Allow notes to be stopped as we aren't using tone() to make the noises.
+#define ENABLE_CALLBACKS
+#define DEFAULT_TEMPO 120 // UI beeps
+#define IS_PRESSED(PIN) !digitalRead(PIN) // Macro to make things a little clearer
+
+// Stores which pin was responsible for waking the system up.
+enum Buttons {PRESSED_NONE, PRESSED_HORN, PRESSED_MODE};
+
+/**
+ * @brief Libraries to include
+ * 
+ */
+#include <cppQueue.h>
+#include <LowPower.h>
+#include <TunePlayer.h>
+#include <EEPROM.h>
+
+// Only needed for the watchdog timer (DO NOT enable for Arduinos with the old bootloader).
+#ifdef ENABLE_WATCHDOG_TIMER
+    #include <avr/wdt.h>
+    #define WATCHDOG_ENABLE wdt_enable(WDTO_4S)
+    #define WATCHDOG_DISABLE wdt_disable()
+    #define WATCHDOG_RESET wdt_reset()
+#else
+    #define WATCHDOG_ENABLE
+    #define WATCHDOG_DISABLE
+    #define WATCHDOG_RESET
+#endif
