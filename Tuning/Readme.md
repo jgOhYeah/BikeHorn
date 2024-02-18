@@ -21,6 +21,11 @@ The application requires python 3 along with a few non built-in libraries. Assum
 ```bash
 pip3 install numpy sounddevice pyserial piecewise-regression matplotlib
 ```
+You may also need to install the port audio library:
+```bash
+sudo apt-get install libportaudio2
+```
+
 Download this repository or at the very least [`BikeHornOptimiser.py`](BikeHornOptimiser.py) and the [corresponding Arduino sketch](OptimiserSketch).
 
 # Main Steps

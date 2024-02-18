@@ -32,13 +32,10 @@ class BikeHornSound : public TimerOneSound {
         void stopSound() {
             TIMSK1 = 0; // Disable the interrupt for changing the piezo frequency (warble mode).
 
-            // Shutdown timer 1
-            TCCR1A = 0;
-            TCCR1B = 0;
-            PORTD &= ~(1 << PB1); // Set pin low just in case it is left high (not sure if needed)
+            TimerOneSound::stopSound();
 
-            // Set timer 2 back to idle
-            OCR2A = IDLE_DUTY; // Enough duty to keep the voltage up ready for next note
+            // Set boost back to idle.
+            SET_IDLE_DUTY();
         }
 
         /**
@@ -69,9 +66,15 @@ class BikeHornSound : public TimerOneSound {
     private:
         /** Returns the value at which the pin should go low each time. Also sets the pwm duty of boost as it is called around the right time */
         uint16_t m_compareValue(uint16_t counter) {
+#ifdef __AVR_ATmega32U4__
+            uint8_t boostSetting = m_timer2Piecewise.apply(counter);
+            TC4H = 0x0;
+            OCR4D = boostSetting;
+#else
             // Set Timer 2 now (a bit not proper, but should work)
             OCR2A = m_timer2Piecewise.apply(counter);
-            return m_timer1Piecewise.apply(counter);
+#endif
+        return m_timer1Piecewise.apply(counter);
         }
 
         PiecewiseLinear m_timer1Piecewise;

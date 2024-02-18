@@ -6,6 +6,7 @@
  */
 
 #pragma once
+#ifdef ACCEL_INSTALLED
 #include "statistics.h"
 
 // #define ACCELEROMETER_ABS_CHANGE // If defined, store and process the absolute value, otherwise the raw change that may include negatives as well
@@ -169,3 +170,4 @@ class Acceleromenter {
         AccelerometerAxis m_yAxis = AccelerometerAxis(ACCEL_Y_PIN);
         AccelerometerAxis m_zAxis = AccelerometerAxis(ACCEL_Z_PIN);
 };
+#endif

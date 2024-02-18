@@ -563,8 +563,10 @@ class BikeHornInterface():
             return False
         
         if self._serial_port.isOpen():
+            # Send something to trigger the 32u4 to reply
+            self._serial_port.write("~`~`i`~`~".encode('UTF-8'))
             response = self._serial_port.read_until("`~`~".encode('UTF-8'))
-            if "~`~`Ready`~`~" not in str(response):
+            if "~`~`Ready`~`~" not in str(response) and "~`~`Ack`~`~" not in str(response):
                 # Failure
                 self._logging.error("Did not get a response from the the horn")
                 return False

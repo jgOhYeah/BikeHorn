@@ -9,17 +9,15 @@
  */
 
 #pragma once
-#define VERSION "1.4.1"
+#define VERSION "1.5.0a"
 
-/**
- * @brief Pins and system setup
- * 
- */
-#define PIEZO_PIN 9 // Fixed as PB1 (Pin 9 on Arduino Nano)
-#define BOOST_PIN 11 // Fixed as PB3 (Pin 11 on Arduino Nano)
-#define LED_EXTERNAL 7
-#define BUTTON_HORN 2 // Needs to be interrupt capable (pin 2 or 3)
-#define BUTTON_MODE 3 // Needs to be interrupt capable (pin 2 or 3)
+// #define WAIT_FOR_SERIAL // Good for debugging, disable for production.
+
+#if defined(__AVR_ATmega32U4__)
+    #include "src/defines_micro.h"
+#else
+    #include "src/defines_nano.h"
+#endif
 
 #define SERIAL_BAUD 38400
 
@@ -60,23 +58,7 @@
 #define LONG_PRESS_TIME 2000
 #define MENU_TIMEOUT 30000
 
-/**
- * @brief Accelerometer
- * 
- */
-#define ACCEL_INSTALLED
-#define ACCEL_X_PIN A4
-#define ACCEL_Y_PIN A3
-#define ACCEL_Z_PIN A2
-#define ACCEL_POWER_PIN A5
-#define ACCEL_PINS_SLEEP_MODE 0b00000000 // Input or output
-#define ACCEL_PINS_SLEEP_STATE 0b11000011 // Pulled high (potentially through a resistor) or low.
-
-/**
- * @brief Other defines
- * 
- */
-#define WELCOME_MSG "Bike horn V" VERSION " started. Compiled " __TIME__ ", " __DATE__
+#define WELCOME_MSG "Bike horn V" VERSION " started. Compiled " __TIME__ ", " __DATE__ ". " CPU_TYPE_MSG " cpu."
 #define MANUAL_CUTOFF // Allow notes to be stopped as we aren't using tone() to make the noises.
 #define ENABLE_CALLBACKS
 #define DEFAULT_TEMPO 120 // UI beeps
@@ -84,6 +66,16 @@
 
 // Stores which pin was responsible for waking the system up.
 enum Buttons {PRESSED_NONE, PRESSED_HORN, PRESSED_MODE};
+
+/**
+ * @brief Other defines
+ * 
+ */
+#ifdef __AVR_ATmega32U4__
+    #define SET_IDLE_DUTY() TC4H = 0x0; OCR4D = IDLE_DUTY
+#else
+    #define SET_IDLE_DUTY() OCR2A = IDLE_DUTY
+#endif
 
 /**
  * @brief Libraries to include

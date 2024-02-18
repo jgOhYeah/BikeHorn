@@ -37,7 +37,12 @@ FlashTuneLoader flashLoader;
 BikeHornSound piezo;
 TunePlayer tune;
 uint8_t curTune = 0;
+
+#ifdef NO_BUTTON_INTERRUPTS
+period_t sleepTime = SLEEP_60MS;
+#else
 period_t sleepTime = SLEEP_FOREVER;
+#endif
 
 #ifdef ENABLE_WARBLE
 Warble warble;
@@ -84,14 +89,22 @@ void loop() {
                 break;
             }
         }
+
+        // Go to sleep until a button is pressed.
         Serial.println(F("Going to sleep"));
         extensionManager.callOnSleep();
         sleepGPIO();
+#ifdef NO_BUTTON_INTERRUPTS
+        waitForButton();
+#else
         wakeUpEnable();
         WATCHDOG_DISABLE;
         LowPower.powerDown(sleepTime, ADC_OFF, BOD_OFF); // The horn will spend most of its life here
         wakeUpDisable();
         WATCHDOG_ENABLE;
+#endif
+
+        // Button pressed. Start waking up.
         wakeGPIO();
         Serial.println(F("Waking up"));
         extensionManager.callOnWake();
@@ -209,55 +222,102 @@ void loop() {
     }
 }
 
+#ifdef __AVR_ATmega32U4__
+/**
+ * Without built in serial pins, setting up for sleep and being active are pretty much the same thing for the ATmega32u4.
+ * 
+ */
+void setupPins() {
+    // Port B: Set everything except the TX LED, piezo pwm and external LED to input pullup.
+    DDRB = bit(PB0) | bit(PB5) | bit(PB6);
+    PORTB = ~(bit(PB0) | bit(PB5) | bit(PB6));
+
+    // Port C: Set the buttons to input pullup.
+    DDRC = 0x0;
+    PORTC = 0xff;
+
+    // Port D: Set all except the RX Led and boost to input pullup.
+    DDRD = bit(PD5) | bit(PD7);
+    PORTD = ~(bit(PD5) | bit(PD7));
+
+    // Port E: Set all except the boost pin to input pullup. // TODO: Change boost pin.
+    DDRE = bit(PE6);
+    PORTE = ~bit(PE6);
+
+    // Port F: Set all to input pullup.
+    DDRF = 0x0;
+    DDRF = 0xff;
+}
+#endif
+
 /**
  * Puts the GPIO into a low power state ready for the microcontroller to sleep.
  */
 void sleepGPIO() {
-    // Shut down timers to release pins
+    // Shut down timers to release pins.
+    // Both ATmega32u4 and ATmega328p.
     TCCR1A = 0;
     TCCR1B = 0;
     stopBoost();
 
+    // Using registers so everything can be done at once easily.
+#ifdef __AVR_ATmega32U4__
+    // TODO: Does the serial port need special treatment?
+    setupPins();
+#else
     // Shutdown serial so it won't be affected by playing with the io lines
     Serial.end();
 
-    // Using registers so everything can be done at once easily.
     DDRB = bit(PB1) | bit(PB3); // Set everything except pwm to input pullup
-#ifdef ACCEL_INSTALLED
+    #ifdef ACCEL_INSTALLED
     DDRC = ACCEL_PINS_SLEEP_MODE;
     PORTC = ACCEL_PINS_SLEEP_STATE; // Pull up unusec inputs, set everything else low.
-#else
+    #else
     DDRC = 0;
     PORTC = 0xff;
-#endif
+    #endif
 
     // Pull all unused pins high to avoid floating and reduce power.
     DDRD = 0x03; // Set serial as an output to tie low
     PORTB = ~(bit(PB1) | bit(PB3));
     PORTD = 0xfc; // Don't pull the serial pins high
-    
+
     // Keep as outputs
     pinMode(LED_EXTERNAL, OUTPUT);
-    pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_EXTERNAL, LOW);
+#endif
+#ifdef USES_LED_BUILTIN
+    pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, LOW);
+#endif
 }
 
 /**
  * Wakes and sets up the GPIO and peripheries.
  */
 void wakeGPIO() {
+#ifdef __AVR_ATmega32U4__
+    setupPins();
+#else
     DDRD = 0x02; // Serial TX is the only output
     PORTD = 0x0E; // Idle high serial
     Serial.begin(SERIAL_BAUD);
     DDRB = bit(PB1) | bit(PB3);
     PORTB = 0x00; // Make sure everything is off
     pinMode(LED_EXTERNAL, OUTPUT);
+#endif
+#ifdef USES_LED_BUILTIN
     pinMode(LED_BUILTIN, OUTPUT);
+#endif
+
+#ifdef WAIT_FOR_SERIAL
+    while (!Serial);
+#endif
 
     // Will leave waking the accelerometer up to its own code as it isn't needed often.
 }
 
+#ifndef NO_BUTTON_INTERRUPTS
 void wakeUpEnable() {
     wakePin = PRESSED_NONE;
     // Set interrupts to wake the processor up again when required
@@ -283,17 +343,58 @@ void wakeUpHornISR() {
 void wakeUpModeISR() {
     wakePin = PRESSED_MODE;
 }
+#else
+/**
+ * The buttons aren't currently connected to interrupt capable pins, so use this instead.
+ * 
+ */
+inline void waitForButton() {
+    wakePin = PRESSED_NONE;
+    while (true) {
+        if(IS_PRESSED(BUTTON_HORN)) {
+            wakePin = PRESSED_HORN;
+            break;
+        }
+        if(IS_PRESSED(BUTTON_MODE)) {
+            wakePin = PRESSED_MODE;
+            break;
+        }
+        WATCHDOG_RESET;
+    #if defined(WAIT_FOR_SERIAL) && defined(__AVR_ATmega32U4__)
+        // Don't let the serial port go to sleep
+        delay(60);
+    #else
+        LowPower.powerDown(sleepTime, ADC_OFF, BOD_OFF); // TODO: Cope with other people adjusting sleepTime in extensions as this doesn't behave the same as interrupts.
+    #endif
+    }
+}
+#endif
 
 /**
  * Sets up and starts the intermediate boost stage.
  */
 void startBoost() {
+#ifdef __AVR_ATmega32U4__
+    // Set OC4D (PD7) as an output and connect it
+    DDRD |= bit(PD7);
+    TCCR4A = 0x0;
+    TCCR4B = bit(CS40); // Prescalar 1
+    TCCR4C = bit(COM4D1) | bit(PWM4D); // Connect OC4D and enable the PWM modulator on 0C4D.
+    TCCR4D = 0x0; // WGM bits set to 0. TOP=OCR4C.
+    TCCR4E = 0x0; // Some read only values here, others only apply to PWM6 mode.
+
+    // Set the top value to 255 as expected of the atmega328p timer 2.
+    TC4H = 0x0; // Set the top 2 bits to 0.
+    OCR4C = 0xff;
+#else
     // Set PB3 to be an output (Pin11 Arduino UNO)
     DDRB |= (1 << PB3);
     
     TCCR2A = (1 << COM2A1) | (1 << WGM21) | (1 << WGM20); // Mode 3, fast PWM, reset at 255
     TCCR2B = (1<< CS20); // Prescalar 1
     OCR2A = IDLE_DUTY; // Enough duty cycle to keep the voltage on the second stage at a reasonable level.
+#endif
+    SET_IDLE_DUTY();
 }
 
 /**
@@ -301,8 +402,16 @@ void startBoost() {
  * 
  */
 inline void stopBoost() {
+#ifdef __AVR_ATmega32U4__
+    TCCR4A = 0x0;
+    TCCR4B = 0x0;
+    TCCR4C = 0x0;
+    TCCR4D = 0x0;
+    TCCR4E = 0x0;
+#else
     TCCR2A = 0;
     TCCR2B = 0;
+#endif
 }
 
 /**

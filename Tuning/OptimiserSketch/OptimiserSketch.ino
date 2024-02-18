@@ -13,9 +13,14 @@
 #include <EEPROM.h>
 #include <stdio.h>
 
-#define PIEZO_PIN 9 // Fixed as PB1 (Pin 9 on Arduino Nano)
-#define BOOST_PIN 11 // Fixed as PB3 (Pin 11 on Arduino Nano)
-#define LED_EXTERNAL 7
+#define PIEZO_PIN 9 // Fixed as PB1 for ATmega328p and PB5 for ATmega32u4 (Pin 9 on Arduino Nano)
+#ifdef __AVR_ATmega32U4__
+    #define BOOST_PIN 6
+    #define LED_EXTERNAL 10
+#else
+    #define BOOST_PIN 11 // Fixed as PB3 (Pin 11 on Arduino Nano)
+    #define LED_EXTERNAL 7
+#endif
 #define SERIAL_BAUD 38400
 
 #define VERSION "1.0.0"
@@ -36,12 +41,11 @@ void setup() {
 
     // Initial setup
     Serial.begin(SERIAL_BAUD);
+    while(!Serial);
     Serial.setTimeout(__LONG_MAX__);
-    pinMode(LED_BUILTIN, OUTPUT);
     pinMode(LED_EXTERNAL, OUTPUT);
     pinMode(PIEZO_PIN, OUTPUT);
     pinMode(BOOST_PIN, OUTPUT);
-    digitalWrite(LED_BUILTIN, HIGH);
     digitalWrite(LED_EXTERNAL, HIGH);
     Serial.println(F(WELCOME_MSG));
 
@@ -91,6 +95,9 @@ void loop() {
         case 'r':
             // Read the specified number of eeprom bytes from an address
             dumpEEPROM();
+            break;
+        case 'i':
+            // Init / reply with ack.
             
     }
 
@@ -116,9 +123,22 @@ void playNote(uint16_t t1Top, uint16_t t1Compare, uint8_t t2Compare) {
     ICR1 = t1Top; // Calculate the corresponding counter
     OCR1A = t1Compare; // Duty cycle
 
+    // Set the boost value.
+#ifdef __AVR_ATmega32U4__
+    TCCR4A = 0x0;
+    TCCR4B = bit(CS40); // Prescalar 1
+    TCCR4C = bit(COM4D1) | bit(PWM4D); // Connect OC4D and enable the PWM modulator on 0C4D.
+    TCCR4D = 0x0; // WGM bits set to 0. TOP=OCR4C.
+    TCCR4E = 0x0; // Some read only values here, others only apply to PWM6 mode.
+
+    // Set the top value to 255 as expected of the atmega328p timer 2.
+    TC4H = 0x0; // Set the top 2 bits to 0.
+    OCR4C = 0xff;
+#else
     TCCR2A = (1 << COM2A1) | (1 << WGM21) | (1 << WGM20); // Mode 3, fast PWM, reset at 255
     TCCR2B = (1<< CS20); // Prescalar 1
     OCR2A = t2Compare; // Duty cycle
+#endif
 }
 
 /**
@@ -128,9 +148,16 @@ void playNote(uint16_t t1Top, uint16_t t1Compare, uint8_t t2Compare) {
 void stop() {
     TCCR1A = 0;
     TCCR1B = 0;
+#ifdef __AVR_ATmega32U4__
+    TCCR4A = 0x0;
+    TCCR4B = 0x0;
+    TCCR4C = 0x0;
+    TCCR4D = 0x0;
+    TCCR4E = 0x0;
+#else
     TCCR2A = 0;
     TCCR2B = 0;
-
+#endif
     digitalWrite(BOOST_PIN, LOW);
     digitalWrite(PIEZO_PIN, LOW);
 }

@@ -11,7 +11,6 @@
 #pragma once
 #include "soundGeneration.h"
 
-// TODO: Put this as a static method in the sound generator class to be not so ugly.
 volatile uint16_t BikeHornSound::nextTop;
 volatile uint16_t BikeHornSound::nextComp;
 

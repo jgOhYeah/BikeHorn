@@ -7,6 +7,7 @@
 #pragma once
 #include <Arduino.h>
 #include "../../../defines.h"
+#ifdef ACCEL_INSTALLED
 #include "../extensionsManager.h"
 #include "../../optimisations.h"
 #include "../../soundGeneration.h"
@@ -200,3 +201,4 @@ class CodeEntry {
         uint16_t m_inputted;
         uint32_t m_lastPressedTime;
 };
+#endif

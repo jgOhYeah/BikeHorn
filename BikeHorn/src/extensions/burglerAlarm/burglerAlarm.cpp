@@ -9,7 +9,7 @@
  */
 
 #include "burglerAlarm.h"
-
+#ifdef ACCEL_INSTALLED
 // Global variables that are accessed.
 extern TunePlayer tune;
 extern BikeHornSound piezo;
@@ -322,3 +322,4 @@ bool CodeEntry::playWithTune(uint16_t *background_tune) {
     }
     return check();
 }
+#endif

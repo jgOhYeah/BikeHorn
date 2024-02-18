@@ -23,11 +23,13 @@ SosExtension sosExtension;
 #include "midiSynth.h"
 MidiSynthExtension midiSynth;
 
-#include "measureBattery.h"
-MeasureBatteryExtension measureBattery;
-
+#ifdef ACCEL_INSTALLED
 #include "burglerAlarm/burglerAlarm.h"
 BurglerAlarmExtension burglerAlarm;
+#endif
+
+#include "measureBattery.h"
+MeasureBatteryExtension measureBattery;
 
 // Array of extensions. This will be the order they appear in the menu if they have menu items.
 Extension* extensionsList[] = {
@@ -38,7 +40,9 @@ Extension* extensionsList[] = {
 #endif
     &midiSynth,
     &measureBattery,
+#ifdef ACCEL_INSTALLED
     &burglerAlarm
+#endif
 };
 
 // Setting up the extensions manager
