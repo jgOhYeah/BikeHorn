@@ -3,7 +3,7 @@
  * configuration for which extensions are enabled.
  * 
  * Written by Jotham Gates
- * Last modified 01/11/2022
+ * Last modified 23/02/2024
  */
 #pragma once
 #include "extensionsManager.h"

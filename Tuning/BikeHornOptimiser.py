@@ -6,7 +6,7 @@ For more details, see Readme.md or go to
 https://github.com/jgOhYeah/BikeHorn/tree/main/Tuning
 
 Written by Jotham Gates
-Last modified 28/02/2022
+Last modified 23/02/2024
 """
 # GUI libraries
 import tkinter as tk                    

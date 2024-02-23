@@ -2,7 +2,7 @@
  * Code for using the accelerometer
  * 
  * Written by Jotham Gates
- * Last modified 22/12/2022
+ * Last modified 23/02/2024
  */
 
 #pragma once
