@@ -5,7 +5,7 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 27/01/2023
+ * Last modified 23/02/2024
  * 
  * Requires these libraries (can be installed through the library manager):
  *   - Low-Power (https://github.com/rocketscream/Low-Power) - Shuts things down to save power.
@@ -54,8 +54,22 @@ volatile Buttons wakePin;
 #include "src/extensions/extensions.h"
 
 void setup() {
+    sleepGPIO(); // Shutdown the timers if the horn crashed previously.
+#ifdef __AVR_ATmega32U4__
+    // Wait for around 10s to make programming a bit easier.
+    for(uint8_t i = 0; i < 100; i++) {
+        digitalWrite(LED_EXTERNAL, HIGH);
+        delay(50);
+        digitalWrite(LED_EXTERNAL, LOW);
+        delay(50);
+        // Jump out if a button is pressed.
+        if (IS_PRESSED(BUTTON_HORN) || IS_PRESSED(BUTTON_MODE)) {
+            break;
+        }
+    }
+#endif
+    // Carry on with initialisation
     WATCHDOG_ENABLE;
-    sleepGPIO(); // Shutdown the timers if the horn crashed previously
     wakeGPIO();
     Serial.println(F(WELCOME_MSG));
     Serial.print(F("There are "));

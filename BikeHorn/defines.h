@@ -5,7 +5,7 @@
  * https://github.com/jgOhYeah/BikeHorn
  * 
  * Written by Jotham Gates
- * Last modified 27/06/2023
+ * Last modified 23/02/2024
  */
 
 #pragma once
@@ -20,8 +20,6 @@
 #endif
 
 #define SERIAL_BAUD 38400
-
-#define IDLE_DUTY 5 // 9.4% duty cycle, keeps the voltage up when not playing
 #define MIDI_CHANNEL 0 // Zero indexed, so many software shows ch. 0 as ch. 1
 #define DEBOUNCE_TIME 20
 

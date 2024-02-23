@@ -2,7 +2,7 @@
  * @file OptimiserSketch.ino
  * @author Jotham Gates
  * @brief Sketch for use with the BikeHornOptimiser tool for tuning the horn to get best performance
- * @date 2021-12-30
+ * @date 2024-02-23
  * 
  * Upload this sketch to the horn and run BikeHornOptimiser.py.
  * NOTE: This script DOES NOT include any low power features. When you are finished, either remove
@@ -98,6 +98,7 @@ void loop() {
             break;
         case 'i':
             // Init / reply with ack.
+            break;
             
     }
 
@@ -134,6 +135,10 @@ void playNote(uint16_t t1Top, uint16_t t1Compare, uint8_t t2Compare) {
     // Set the top value to 255 as expected of the atmega328p timer 2.
     TC4H = 0x0; // Set the top 2 bits to 0.
     OCR4C = 0xff;
+
+    // Set the duty.
+    TC4H = 0x0;
+    OCR4D = t2Compare;
 #else
     TCCR2A = (1 << COM2A1) | (1 << WGM21) | (1 << WGM20); // Mode 3, fast PWM, reset at 255
     TCCR2B = (1<< CS20); // Prescalar 1

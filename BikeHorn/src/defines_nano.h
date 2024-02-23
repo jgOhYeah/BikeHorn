@@ -2,7 +2,7 @@
  * Pins and definitions specific to Arduino Nano (ATmega328p) based units.
  * 
  * Written by Jotham Gates.
- * Last modified 15/02/2024
+ * Last modified 23/02/2024
  */
 #pragma once
 
@@ -15,6 +15,8 @@
 #define LED_EXTERNAL 7
 #define BUTTON_HORN 2 // Needs to be interrupt capable (pin 2 or 3)
 #define BUTTON_MODE 3 // Needs to be interrupt capable (pin 2 or 3)
+
+#define IDLE_DUTY 5 // /255 duty cycle, keeps the voltage up when not playing
 
 /**
  * @brief Accelerometer

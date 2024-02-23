@@ -2,7 +2,7 @@
  * Pins and definitions specific to Arduino Micro (ATmega32u4) based units.
  * 
  * Written by Jotham Gates and Nguyen Nguyen.
- * Last modified 17/02/2024
+ * Last modified 23/02/2024
  */
 #pragma once
 
@@ -15,6 +15,8 @@
 #define LED_EXTERNAL 10 // PB6
 #define BUTTON_HORN 5 // Ideally interrupt capable but not, D5, PC6,
 #define BUTTON_MODE 13 // Ideally interrupt capable but not, D13, PC7.
+
+#define IDLE_DUTY 1 // /255 duty cycle, keeps the voltage up when not playing
 
 /**
  * @brief Accelerometer
